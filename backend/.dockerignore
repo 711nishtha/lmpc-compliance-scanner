@@ -1,0 +1,28 @@
+# Without this, `COPY . .` bakes the local dev SQLite database (including demo user
+# password hashes) and every locally uploaded scan image into the production image —
+# confirmed happening before this file existed. Production must start from an empty
+# Postgres and an empty storage dir.
+
+data/
+*.db
+*.sqlite
+*.sqlite3
+
+# Secrets — .env.example is the committed template and is intentionally NOT excluded.
+.env
+.env.*
+!.env.example
+
+__pycache__/
+*.pyc
+*.pyo
+.pytest_cache/
+.venv/
+venv/
+
+# Build/CI noise
+*.log
+.git/
+.gitignore
+Dockerfile
+.dockerignore

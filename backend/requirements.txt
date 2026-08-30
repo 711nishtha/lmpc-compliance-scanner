@@ -1,0 +1,22 @@
+# Pinned to exact versions so a fresh install cannot silently pull a breaking update.
+# Regenerate deliberately (bump + run the test suite), never by loosening these pins.
+fastapi==0.141.1
+uvicorn[standard]==0.52.1
+pydantic==2.13.4
+sqlalchemy==2.0.52
+alembic==1.19.1
+opencv-python-headless==5.0.0.93
+numpy==2.4.6
+pillow==10.4.0
+pytesseract==0.3.13
+reportlab==5.0.1
+python-docx==1.2.0
+python-multipart==0.0.32
+bcrypt==5.0.0
+pyjwt==2.13.0
+
+# Test / tooling
+pytest==9.1.1
+
+# Used by scripts/ for reading primary-source Gazette PDFs (see docs/LEGAL_REQUIREMENTS.md §1.1)
+pypdf==6.16.2

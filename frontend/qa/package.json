@@ -1,0 +1,16 @@
+{
+  "name": "qa",
+  "version": "1.0.0",
+  "description": "Real Playwright scripts driving the actual running frontend + backend — no mocked API. These caught real bugs that unit tests could not (an absent annotated-image feature, a date-filter that excluded same-day scans, a role gate that existed only in the backend, a hero that pushed its own stat row below the projector fold).",
+  "main": "01_auth.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "type": "commonjs",
+  "dependencies": {
+    "playwright": "^1.62.1"
+  }
+}

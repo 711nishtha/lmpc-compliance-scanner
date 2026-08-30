@@ -1,0 +1,28 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>LMPC Compliance Scanner</title>
+    <!-- Applied before first paint so the correct palette is never flashed.
+         Mirrors the resolution order in src/theme/theme.js. -->
+    <script>
+      (function () {
+        try {
+          var v = localStorage.getItem('lmpc-theme');
+          var t = (v === 'dark' || v === 'light')
+            ? v
+            : (window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light');
+          document.documentElement.setAttribute('data-theme', t);
+          document.documentElement.style.colorScheme = t;
+        } catch (e) {
+          document.documentElement.setAttribute('data-theme', 'light');
+        }
+      })();
+    </script>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/src/main.jsx"></script>
+  </body>
+</html>

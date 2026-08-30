@@ -1,0 +1,63 @@
+# Keeps the Render free-tier backend warm.
+#
+# Render free web services sleep after ~15 minutes of inactivity and take roughly
+# 50-60s to cold-start. That is a bad surprise when a judge clicks "scan" — so this
+# pings /api/health every 11 minutes to stay inside the idle window.
+#
+# TODO(after Step 3): replace BACKEND_URL below with the real Render URL, or set a
+# repository variable named BACKEND_URL (Settings > Secrets and variables > Actions >
+# Variables) and this workflow will pick it up automatically with no code change.
+name: keepalive
+
+on:
+  schedule:
+    # Every 11 minutes. GitHub's scheduler is best-effort and can run late under load,
+    # so 11 (not 14) leaves headroom inside Render's ~15-minute idle timeout.
+    - cron: "*/11 * * * *"
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+
+concurrency:
+  group: keepalive
+  cancel-in-progress: true
+
+jobs:
+  ping:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Ping backend health endpoint
+        env:
+          # Repository variable wins; the literal is the fallback placeholder.
+          BACKEND_URL: ${{ vars.BACKEND_URL || 'https://REPLACE-ME.onrender.com' }}
+        run: |
+          set -uo pipefail
+
+          if [[ "$BACKEND_URL" == *"REPLACE-ME"* ]]; then
+            echo "::warning::BACKEND_URL is still the placeholder — keepalive is a no-op."
+            echo "Set a repository variable named BACKEND_URL to the deployed Render URL."
+            exit 0
+          fi
+
+          # Generous max-time: a cold start is exactly the case we are paying for here.
+          for attempt in 1 2 3; do
+            start=$(date +%s)
+            code=$(curl -sS -o /tmp/body.txt -w '%{http_code}' --max-time 120 \
+                     "${BACKEND_URL%/}/api/health" || echo "000")
+            elapsed=$(( $(date +%s) - start ))
+
+            echo "attempt ${attempt}: HTTP ${code} in ${elapsed}s -> $(cat /tmp/body.txt)"
+
+            if [[ "$code" == "200" ]]; then
+              if (( elapsed > 20 )); then
+                echo "::notice::Cold start detected (${elapsed}s) — the service had gone to sleep."
+              fi
+              exit 0
+            fi
+            sleep 15
+          done
+
+          echo "::error::Backend did not return 200 after 3 attempts."
+          exit 1

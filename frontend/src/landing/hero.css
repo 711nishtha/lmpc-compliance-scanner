@@ -1,0 +1,384 @@
+/* ==========================================================================
+   Landing hero — rebuilt from scratch.
+   --------------------------------------------------------------------------
+   Scope: this file styles ONLY the fixed nav and the full-viewport hero stage.
+   Nothing here targets any section below the hero.
+
+   Motion values mined from the visual reference: ease-expo curve, 24px rise,
+   150/350/550ms stagger, 500ms overlay, i*50+80ms mobile link cadence.
+   No third animation library — plain CSS alongside the existing GSAP reveals.
+   ========================================================================== */
+
+/* The hero is always the dark stage, in BOTH themes: it is a deliberate
+   full-bleed band, and its text/controls therefore always use the hero-* tokens
+   rather than the page tokens (which are tuned for the cream body below). */
+.hero-stage {
+  position: relative;
+  isolation: isolate;
+  min-height: 100vh;
+  min-height: 100dvh;
+  width: 100%;
+  display: grid;
+  place-items: center;
+  overflow: hidden;
+  background: var(--hero-bg);
+  color: var(--hero-foreground);
+}
+
+/* ---- Full-bleed video ---------------------------------------------------- */
+.hero-video {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  z-index: 0;
+  /* Black-ground abstract footage: no competing text, so it runs essentially clean.
+     No blur and no heavy darkening -- the previous cream-UI source needed
+     brightness(0.38) purely to stop its own headings fighting the headline. */
+  filter: saturate(1.05) brightness(0.92);
+  opacity: 1;
+  transform: scale(1.02);
+}
+
+/* ---- Scrim: 60% top / 20% mid / 70% bottom of hero-bg -------------------- */
+/* Stops kept at the reference's values. The centre pool is tuned to sit the copy
+   block on a calm ground: the loop's glowing object is dead-centre and otherwise
+   pokes out around the CTA row. The pool is narrow (56%) so the hands at the left
+   and right edges stay fully visible -- it mutes the glow, not the footage. */
+.hero-scrim {
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  background:
+    linear-gradient(
+      to bottom,
+      color-mix(in srgb, var(--hero-bg) 60%, transparent) 0%,
+      color-mix(in srgb, var(--hero-bg) 20%, transparent) 50%,
+      color-mix(in srgb, var(--hero-bg) 70%, transparent) 100%
+    ),
+    /* A soft centre pool keeps the headline legible over busy frames without
+       darkening the whole video. */
+    radial-gradient(
+      ellipse 56% 52% at 50% 50%,
+      color-mix(in srgb, var(--hero-bg) 82%, transparent) 0%,
+      color-mix(in srgb, var(--hero-bg) 55%, transparent) 55%,
+      color-mix(in srgb, var(--hero-bg) 12%, transparent) 82%,
+      transparent 100%
+    );
+}
+
+/* ---- Centred content block — the ONLY thing above the scrim -------------- */
+.hero-content {
+  position: relative;
+  z-index: 2;
+  width: min(100% - 2 * var(--space-6), 60rem);
+  margin-inline: auto;
+  text-align: center;
+  padding-block: var(--space-7);
+}
+
+.hero-eyebrow {
+  margin: 0 0 var(--space-4);
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  letter-spacing: var(--tracking-label);
+  text-transform: uppercase;
+  color: var(--hero-muted);
+}
+
+.hero-title {
+  margin: 0;
+  font-family: var(--font-display);
+  font-weight: var(--weight-medium);
+  font-size: clamp(2.25rem, 6vw, 4.5rem);
+  line-height: 1.06;
+  letter-spacing: -0.02em;
+  color: var(--hero-foreground);
+  text-wrap: balance;
+}
+.hero-title-soft { color: color-mix(in srgb, var(--hero-foreground) 78%, transparent); }
+
+.hero-subhead {
+  margin: var(--space-5) auto 0;
+  max-width: 46rem;
+  font-size: clamp(1rem, 1.4vw, 1.125rem);
+  line-height: var(--leading-body);
+  color: var(--hero-muted);
+  text-wrap: pretty;
+}
+
+.hero-actions {
+  margin-top: var(--space-7);
+  display: flex;
+  gap: var(--space-3);
+  justify-content: center;
+  flex-wrap: wrap;
+}
+
+.hero-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 46px;
+  padding: 0 var(--space-6);
+  border-radius: var(--radius-pill);
+  font-size: var(--text-sm);
+  font-weight: var(--weight-semi);
+  text-decoration: none;
+  transition: background var(--dur-fast) var(--ease-out),
+              border-color var(--dur-fast) var(--ease-out);
+}
+.hero-btn-primary {
+  background: var(--hero-foreground);
+  color: var(--hero-bg);
+  border: 1px solid transparent;
+}
+.hero-btn-primary:hover {
+  background: color-mix(in srgb, var(--hero-foreground) 88%, transparent);
+  color: var(--hero-bg);
+}
+.hero-btn-ghost {
+  background: var(--hero-glass);
+  color: var(--hero-foreground);
+  border: 1px solid color-mix(in srgb, var(--hero-foreground) 26%, transparent);
+  backdrop-filter: blur(10px);
+}
+.hero-btn-ghost:hover {
+  background: color-mix(in srgb, var(--hero-foreground) 16%, transparent);
+  border-color: color-mix(in srgb, var(--hero-foreground) 45%, transparent);
+}
+
+/* ---- Reveal motion ------------------------------------------------------- */
+@keyframes hero-fade-up {
+  from { opacity: 0; transform: translateY(24px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+.hero-reveal { opacity: 0; animation: hero-fade-up 1s var(--ease-expo) forwards; }
+.hero-d1 { animation-delay: 150ms; }
+.hero-d2 { animation-delay: 350ms; }
+.hero-d3 { animation-delay: 550ms; }
+
+@media (prefers-reduced-motion: reduce) {
+  .hero-reveal { animation: none; opacity: 1; }
+  .hero-video { display: none; }
+}
+
+/* ==========================================================================
+   Fixed nav — one clean horizontal row, three zones, no overlap
+   ========================================================================== */
+.hero-nav {
+  position: fixed;
+  top: 0; left: 0; right: 0;
+  z-index: 50;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-5);
+  padding: var(--space-4) var(--space-6);
+  /* Transparent over the video, but with a soft top-shade so the wordmark and
+     links stay legible over bright frames. */
+  background: linear-gradient(
+    to bottom,
+    color-mix(in srgb, var(--hero-bg) 78%, transparent),
+    transparent
+  );
+  color: var(--hero-foreground);
+}
+
+.hero-wordmark {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-3);
+  font-family: var(--font-display);
+  font-size: var(--text-lg);
+  font-weight: var(--weight-semi);
+  color: var(--hero-foreground);
+  text-decoration: none;
+  white-space: nowrap;
+  flex: 0 0 auto;
+}
+.hero-mark {
+  width: 18px; height: 18px;
+  border-radius: 5px;
+  background: var(--color-brand-teal);
+  flex: 0 0 auto;
+}
+
+/* Centre-right: the pill group. margin-left:auto pushes it off the wordmark,
+   and the actions block that follows keeps it from reaching the edge. */
+.hero-nav-links {
+  display: flex;
+  align-items: center;
+  gap: var(--space-1);
+  margin-left: auto;
+  padding: 6px var(--space-2);
+  border-radius: var(--radius-pill);
+  border: 1px solid color-mix(in srgb, var(--hero-foreground) 12%, transparent);
+  background: var(--hero-glass);
+  backdrop-filter: blur(12px);
+}
+.hero-nav-links a {
+  padding: 6px var(--space-4);
+  border-radius: var(--radius-pill);
+  font-size: var(--text-sm);
+  color: var(--hero-muted);
+  text-decoration: none;
+  white-space: nowrap;
+  transition: background var(--dur-fast) var(--ease-out),
+              color var(--dur-fast) var(--ease-out);
+}
+.hero-nav-links a:hover {
+  background: color-mix(in srgb, var(--hero-foreground) 12%, transparent);
+  color: var(--hero-foreground);
+}
+
+.hero-nav-actions {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  flex: 0 0 auto;
+}
+.hero-nav-cta {
+  display: inline-flex;
+  align-items: center;
+  min-height: 40px;
+  padding: 0 var(--space-5);
+  border-radius: var(--radius-pill);
+  background: var(--hero-foreground);
+  color: var(--hero-bg);
+  font-size: var(--text-sm);
+  font-weight: var(--weight-semi);
+  text-decoration: none;
+  white-space: nowrap;
+  transition: background var(--dur-fast) var(--ease-out);
+}
+.hero-nav-cta:hover {
+  background: color-mix(in srgb, var(--hero-foreground) 88%, transparent);
+  color: var(--hero-bg);
+}
+
+/* The toggle joins the glass language while it sits on the hero. */
+.hero-nav .theme-toggle {
+  width: 40px; height: 40px;
+  border-color: color-mix(in srgb, var(--hero-foreground) 18%, transparent);
+  background: var(--hero-glass);
+  color: var(--hero-foreground);
+  backdrop-filter: blur(12px);
+}
+.hero-nav .theme-toggle:hover {
+  background: color-mix(in srgb, var(--hero-foreground) 16%, transparent);
+}
+
+/* ---- Hamburger morph ----------------------------------------------------- */
+.hero-burger {
+  position: relative;
+  display: none;
+  width: 40px; height: 40px;
+  place-items: center;
+  border-radius: var(--radius-pill);
+  border: 1px solid color-mix(in srgb, var(--hero-foreground) 18%, transparent);
+  background: var(--hero-glass);
+  color: var(--hero-foreground);
+  backdrop-filter: blur(12px);
+  cursor: pointer;
+}
+.hero-burger span {
+  position: absolute;
+  font-size: 1.05rem;
+  line-height: 1;
+  transition: opacity 300ms var(--ease-expo), transform 300ms var(--ease-expo);
+}
+.hero-burger .icon-menu  { opacity: 1; transform: rotate(0deg) scale(1); }
+.hero-burger .icon-close { opacity: 0; transform: rotate(90deg) scale(0.5); }
+.hero-burger[aria-expanded="true"] .icon-menu  { opacity: 0; transform: rotate(-90deg) scale(0.5); }
+.hero-burger[aria-expanded="true"] .icon-close { opacity: 1; transform: rotate(0deg) scale(1); }
+
+/* ---- Mobile sheet -------------------------------------------------------- */
+.hero-overlay {
+  position: fixed; inset: 0; z-index: 40;
+  background: rgba(0, 0, 0, 0);
+  backdrop-filter: blur(0px);
+  pointer-events: none;
+  transition: background 500ms var(--ease-expo), backdrop-filter 500ms var(--ease-expo);
+}
+.hero-overlay.open {
+  background: rgba(0, 0, 0, 0.6);
+  backdrop-filter: blur(12px);
+  pointer-events: auto;
+}
+
+.hero-sheet {
+  position: fixed; left: 12px; right: 12px; top: 74px; z-index: 60;
+  overflow: hidden;
+  border-radius: var(--radius-lg);
+  border: 1px solid color-mix(in srgb, var(--hero-foreground) 10%, transparent);
+  background: color-mix(in srgb, var(--hero-bg) 94%, transparent);
+  backdrop-filter: blur(20px);
+  max-height: 0;
+  opacity: 0;
+  transition: max-height 500ms var(--ease-expo), opacity 500ms var(--ease-expo);
+}
+.hero-sheet.open { max-height: 420px; opacity: 1; }
+.hero-sheet nav {
+  display: flex; flex-direction: column; gap: var(--space-1);
+  padding: var(--space-4);
+}
+.hero-sheet a {
+  display: flex; align-items: center; justify-content: space-between;
+  min-height: 44px;
+  padding: var(--space-3) var(--space-4);
+  border-radius: var(--radius-md);
+  color: var(--hero-foreground);
+  text-decoration: none;
+  font-weight: var(--weight-medium);
+  opacity: 0; transform: translateY(-8px);
+  transition: opacity 400ms var(--ease-expo), transform 400ms var(--ease-expo),
+              background var(--dur-fast) var(--ease-out);
+}
+.hero-sheet.open a { opacity: 1; transform: translateY(0); }
+.hero-sheet a:hover { background: var(--hero-glass); }
+.hero-sheet.open a:nth-child(1) { transition-delay: 80ms; }
+.hero-sheet.open a:nth-child(2) { transition-delay: 130ms; }
+.hero-sheet.open a:nth-child(3) { transition-delay: 180ms; }
+.hero-sheet.open a:nth-child(4) { transition-delay: 230ms; }
+
+/* ---- Responsive ---------------------------------------------------------- */
+@media (max-width: 960px) {
+  /* Collapse the link pill into the sheet before it can crowd the CTA. */
+  .hero-nav-links { display: none; }
+  .hero-burger { display: grid; }
+}
+@media (max-width: 720px) {
+  /* Portrait crops the 16:9 loop hard, so the glowing object fills the middle and
+     sits directly behind the CTA stack. The hands are cropped out at this width, so
+     dropping the loop's exposure costs nothing visually -- the same shapes still
+     read, just quieter -- and buys back a calm ground for the copy. A wider scrim
+     pool alone did not reach far enough down the frame to fix it. */
+  .hero-video { filter: saturate(1) brightness(0.5); }
+  .hero-scrim {
+    background:
+      linear-gradient(
+        to bottom,
+        color-mix(in srgb, var(--hero-bg) 60%, transparent) 0%,
+        color-mix(in srgb, var(--hero-bg) 28%, transparent) 50%,
+        color-mix(in srgb, var(--hero-bg) 70%, transparent) 100%
+      ),
+      radial-gradient(
+        ellipse 100% 72% at 50% 54%,
+        color-mix(in srgb, var(--hero-bg) 78%, transparent) 0%,
+        color-mix(in srgb, var(--hero-bg) 45%, transparent) 70%,
+        transparent 100%
+      );
+  }
+}
+
+@media (max-width: 560px) {
+  /* At phone width the CTA duplicates the sheet's own CTA — drop it so the row
+     stays a single clean line: wordmark · toggle · burger. */
+  .hero-nav-cta { display: none; }
+  .hero-nav { padding: var(--space-3) var(--space-4); }
+  .hero-wordmark { font-size: var(--text-base); }
+  .hero-actions { flex-direction: column; align-items: stretch; }
+  .hero-btn { width: 100%; }
+}
