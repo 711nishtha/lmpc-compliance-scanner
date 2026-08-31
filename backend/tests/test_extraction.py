@@ -27,6 +27,20 @@ def test_extracts_net_quantity_and_infers_category():
     assert d.commodity_category == "solid"
 
 
+def test_net_quantity_survives_ml_misread_as_mi():
+    """Real production bug, found on a live deployed scan (not a hypothetical): Tesseract
+    genuinely OCR'd a label's '500 ml' as region.text == '500 mi' (l -> i, a very common single-
+    character OCR confusion). NET_QTY_RE's unit whitelist had no tolerance for it, so a plainly
+    legible net quantity extracted as "not found" -- confirmed by re-running the exact pipeline
+    against the exact uploaded image from the failing deployed scan."""
+    regions = [region("Carbonated Drink"), region("500 mi", y=25)]
+    d = extract_declarations(regions)
+    assert d.net_quantity_value.found
+    assert d.net_quantity_value.value == "500"
+    assert d.net_quantity_unit.value == "ml"
+    assert d.commodity_category == "liquid"
+
+
 def test_extracts_consumer_care_phone_and_email():
     regions = [region("Consumer Care: 1800-123-4567, help@example.com")]
     d = extract_declarations(regions)

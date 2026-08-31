@@ -47,6 +47,27 @@ def _normalize_digits(s: str) -> str:
     return s.translate(DEVANAGARI_DIGITS).translate(GUJARATI_DIGITS)
 
 
+# Real Tesseract misreads confirmed by re-running the actual pipeline against a real deployed
+# scan (backend/tests/test_extraction.py::test_ml_ocr_misread_as_mi... captures the exact case):
+# a genuine label's "500 ml" was OCR'd as region.text == "500 mi" (lowercase l -> i is one of
+# the most common single-character OCR confusions, worse at the resolution real phone photos get
+# downscaled to). NET_QTY_RE's unit whitelist had no tolerance for it, so a plainly legible net
+# quantity declaration extracted as "not found" -- a false negative on a field a human reads
+# instantly. Narrowly scoped and evidence-driven, same discipline as NET_QTY_ANCHORS' own
+# docstring: add an entry here only when a REAL OCR run demonstrates the confusion, not
+# speculatively. "mi" specifically is safe to always treat as "ml" in this domain -- miles are
+# never a valid Legal Metrology net-quantity unit for a packaged commodity.
+_UNIT_OCR_MISREADS = {
+    r"\bmi\b": "ml",
+}
+
+
+def _normalize_unit_ocr_noise(s: str) -> str:
+    for pattern, replacement in _UNIT_OCR_MISREADS.items():
+        s = re.sub(pattern, replacement, s, flags=re.IGNORECASE)
+    return s
+
+
 def _region_matches_anchor(region: OcrRegion, group: str) -> bool:
     anchors = ALL_ANCHOR_GROUPS[group]
     text_lower = region.text.lower()
@@ -98,7 +119,7 @@ def extract_declarations(regions: list[OcrRegion]) -> Declarations:
     for region in search_regions:
         if region is None:
             continue
-        norm = _normalize_digits(region.text)
+        norm = _normalize_unit_ocr_noise(_normalize_digits(region.text))
         m = NET_QTY_RE.search(norm)
         if m:
             d.net_quantity_value = _to_extracted_field(region, m.group(1))
