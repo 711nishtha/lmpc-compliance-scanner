@@ -109,8 +109,16 @@
   --color-advisory-border: var(--color-accent-deep);
   --color-advisory-text:   #5A4632;
 
-  /* ---- Typography ----------------------------------------------------- */
-  --font-display: 'Space Grotesk', ui-sans-serif, system-ui, sans-serif;
+  /* ---- Typography -------------------------------------------------------
+     Display font is Libre Baskerville — a genuine open-source Baskerville
+     revival (Google Fonts, not a dafont scrape: those files are frequently
+     non-commercially-licensed and can't load through this project's
+     CSP-restricted font allowlist anyway, so a proper licensed Baskerville
+     is both the safer and the more correct production choice).
+     Only ships weights 400/700 (classic-serif convention — no 500/600) —
+     --weight-medium/--weight-semi on a display element round to the
+     nearest loaded weight, which reads fine, not broken. */
+  --font-display: 'Libre Baskerville', Georgia, 'Times New Roman', serif;
   --font-body:    'Inter', system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
   --font-mono:    'JetBrains Mono', ui-monospace, SFMono-Regular, Consolas, monospace;
 
