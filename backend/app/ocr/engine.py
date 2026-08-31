@@ -18,6 +18,27 @@ SUPPORTED_LANGS = ("eng", "hin", "guj")
 DEVANAGARI_RANGE = (0x0900, 0x097F)
 GUJARATI_RANGE = (0x0A80, 0x0AFF)
 
+# A word-level confidence floor was tried here and REVERTED: it looked well-justified from one
+# real deployed scan (legit reads 60-96, noise 0-33), but re-testing against demo_data's real
+# Gujarati label (10_gujarati_bilingual_liquid.png) showed it silently drops genuinely CORRECT
+# Gujarati words -- "ઉત્પાદન તારીખ" (production date) lost its first word and mfg-date extraction
+# broke. Indian-script OCR word confidence runs measurably noisier than Latin's even when the
+# read is right (complex conjuncts/matras), so one fixed floor across all three scripts causes
+# more real damage than it prevents. The dominant-script fix below (MIXED_SCRIPT_NOISE_TOLERANCE)
+# already structurally prevents the hallucination this floor was meant to catch -- an eng-only
+# model's output alphabet has no Gujarati/Devanagari characters in it at all, so it cannot ever
+# emit one, floor or no floor. Left as a documented dead end so it isn't tried again the same way.
+
+# A merged line's minority-script character count below which it is treated as combined-model
+# noise contaminating an otherwise single-script line, not genuine mixed-script content, and is
+# re-classified by its MAJORITY script instead of falling back to "mixed". This is what breaks
+# the vicious cycle: a "mixed" classification currently re-runs the SAME combined model that
+# produced the stray character, which is structurally incapable of fixing its own hallucination
+# since nothing about the input changed. The threshold is set well below what a genuine
+# mixed-script line carries -- a real Hindi phrase next to a Latin email address (the case this
+# whole script-selection design exists for) has many characters on both sides, not one or two.
+MIXED_SCRIPT_NOISE_TOLERANCE = 2
+
 
 class OcrUnavailableError(RuntimeError):
     pass
@@ -134,10 +155,31 @@ def _ocr_crop(crop: np.ndarray, lang: str) -> tuple[str, float]:
 
 def _dominant_script(text: str) -> str:
     """Classifies a region's dominant script by the Unicode block of its letters (digits and
-    punctuation are script-neutral and ignored). Returns "eng"/"hin"/"guj" only when every
-    letter present belongs to that one script; "mixed" if letters from more than one script are
-    present (or none at all, e.g. an all-digit line) -- "mixed" is the signal to fall back to
-    the combined model rather than risk a single-language model mangling the other script."""
+    punctuation are script-neutral and ignored). Returns "eng"/"hin"/"guj" when one script
+    overwhelmingly dominates (see MIXED_SCRIPT_NOISE_TOLERANCE below); "mixed" only when more
+    than one script has substantial presence, or none at all (e.g. an all-digit line) -- "mixed"
+    is the signal to fall back to the combined model rather than risk a single-language model
+    mangling the other script.
+
+    A pure "any letter from a second script -> mixed" rule (the original version of this
+    function) has a real failure mode, confirmed on a live deployed scan: the FIRST-pass combined
+    model can itself hallucinate a stray Gujarati/Devanagari character inside an otherwise-clean
+    English line (a nutrition-table gridline or lens-blur artifact misread as one glyph). That
+    single stray character then makes this function call the line "mixed", which sends it back
+    to be re-OCR'd by the SAME combined model that produced the hallucination -- a vicious cycle
+    that can never self-correct, since nothing about the input changes between the two combined-
+    model passes. Tolerating a small minority count when ENGLISH is the majority breaks that
+    cycle by giving the line an eng-only re-read that would actually fix it.
+
+    Deliberately ASYMMETRIC: the tolerance only collapses "mixed" to "eng", never to "hin"/"guj".
+    A real Gujarati demo label regressed under a symmetric version of this rule: a genuinely
+    Gujarati net-quantity line ("chokkho jattho 1000 ml") legitimately keeps its unit abbreviation
+    in Latin script -- extremely common on real Indian labels -- so its minority side is Latin,
+    not noise. Collapsing that to "guj"-only sent it to a model that is structurally incapable of
+    ever producing the Latin "ml" it needs, since a single-script model's output alphabet doesn't
+    include the other script at all. Only English-majority contamination is the confirmed real
+    bug; a Gujarati/Hindi-majority line with a Latin minority keeps its combined-model fallback,
+    which is what correctly read this line before any of these changes and still does."""
     latin = deva = guj = 0
     for c in text:
         if not c.isalpha():
@@ -149,8 +191,21 @@ def _dominant_script(text: str) -> str:
             guj += 1
         elif c.isascii():
             latin += 1
-    present = [lang for lang, count in (("eng", latin), ("hin", deva), ("guj", guj)) if count > 0]
-    return present[0] if len(present) == 1 else "mixed"
+    counts = {"eng": latin, "hin": deva, "guj": guj}
+    present = [lang for lang, count in counts.items() if count > 0]
+    if len(present) <= 1:
+        return present[0] if present else "mixed"
+
+    ranked = sorted(counts.items(), key=lambda kv: kv[1], reverse=True)
+    top_lang, top_count = ranked[0]
+    minority_total = sum(count for _, count in ranked[1:])
+    if (
+        top_lang == "eng"
+        and minority_total <= MIXED_SCRIPT_NOISE_TOLERANCE
+        and top_count > minority_total
+    ):
+        return top_lang
+    return "mixed"
 
 
 def _refine_regions_by_script(
