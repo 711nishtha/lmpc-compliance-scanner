@@ -11,9 +11,9 @@ Commodities) Rules, 2011**, producing an itemized, rule-cited compliance report.
 
 | Service | URL |
 |---|---|
-| Frontend (Render Static Site) | `https://REPLACE-ME.onrender.com` |
-| Backend API (Render Web Service) | `https://REPLACE-ME.onrender.com` |
-| API docs (Swagger) | `https://REPLACE-ME.onrender.com/docs` |
+| Frontend (Render Static Site) | <https://lmpc-compliance-scanner-1.onrender.com> |
+| Backend API (Render Web Service) | <https://lmpc-compliance-scanner.onrender.com> |
+| API docs (Swagger) | disabled in this deployment (`ENABLE_DOCS` unset — off by default in production, see `docs/DEPLOYMENT.md`) |
 
 Demo accounts (seeded by `backend/scripts/seed_demo.py`):
 

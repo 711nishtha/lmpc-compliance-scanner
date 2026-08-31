@@ -39,6 +39,23 @@ GUJARATI_RANGE = (0x0A80, 0x0AFF)
 # whole script-selection design exists for) has many characters on both sides, not one or two.
 MIXED_SCRIPT_NOISE_TOLERANCE = 2
 
+# Speed: real numbers, profiled against a real deployed scan (a genuine 2400x1257 phone photo,
+# not a flat demo mockup) -- run_ocr() split roughly evenly between the one full-image combined-
+# model pass (~4s) and _refine_regions_by_script()'s per-region loop (~6s, ~167ms/region), which
+# issues ONE ADDITIONAL Tesseract subprocess call per merged region. On that photo 19 of 36
+# merged regions (53%) had two or fewer alphanumeric characters -- hallucinated single glyphs,
+# punctuation, gridline/icon fragments -- and NONE of NET_QTY_RE/MRP_VALUE_RE/the anchor keyword
+# lists can ever match something that short (shortest real anchor keyword, "rs", is itself only
+# 2 characters and in practice never appears merged-alone -- see keywords.py). Refining such a
+# region's script tag is a real, measured cost for zero possible extraction benefit.
+# Load-bearing distinction: this does NOT discard the region or its text, only the SECOND,
+# redundant OCR call -- anchor/regex matching runs on region.text regardless of whether it was
+# refined, so nothing here can cause the kind of silent content loss the (reverted)
+# confidence-floor attempt caused. Short simple tokens are also exactly what the first-pass
+# combined model reads reliably in either script -- refinement exists for longer, more ambiguous
+# lines, which this does not touch.
+MIN_REFINABLE_ALNUM_CHARS = 3
+
 
 class OcrUnavailableError(RuntimeError):
     pass
@@ -214,6 +231,12 @@ def _refine_regions_by_script(
     lang_string = "+".join(langs)
     refined: list[OcrRegion] = []
     for region in regions:
+        if sum(c.isalnum() for c in region.text) < MIN_REFINABLE_ALNUM_CHARS:
+            # Too short to ever match an anchor keyword or a NET_QTY_RE/MRP_VALUE_RE pattern --
+            # see MIN_REFINABLE_ALNUM_CHARS. Keep the first-pass combined-model reading as-is
+            # rather than spending a second Tesseract call on it.
+            refined.append(region)
+            continue
         crop = _crop_region(image, region)
         script = _dominant_script(region.text)
         if script in langs:

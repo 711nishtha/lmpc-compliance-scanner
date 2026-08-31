@@ -8,10 +8,12 @@ threshold as a fix here again.
 """
 import sys
 from pathlib import Path
+from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from app.ocr.engine import _dominant_script
+from app.extraction.fields import OcrRegion
+from app.ocr.engine import MIN_REFINABLE_ALNUM_CHARS, _dominant_script, _refine_regions_by_script
 
 
 # ---------- _dominant_script: majority-vote noise tolerance ----------
@@ -62,3 +64,33 @@ def test_gujarati_majority_with_latin_unit_abbreviation_stays_mixed():
 
 def test_all_digit_line_has_no_script_and_stays_mixed():
     assert _dominant_script("12345 / 67890") == "mixed"
+
+
+# ---------- _refine_regions_by_script: speed -- skip refinement for too-short regions ----------
+
+def _region(text, x=0, y=0, w=50, h=20, conf=50.0):
+    return OcrRegion(text=text, x=x, y=y, width=w, height=h, confidence=conf, language="eng+hin+guj")
+
+
+def test_short_noise_regions_never_reach_the_second_ocr_call():
+    """Real, measured speed bug: on a live deployed scan, 19 of 36 merged regions (53%) were
+    two-or-fewer-character noise fragments, each still costing a full second Tesseract subprocess
+    call (~167ms average) with zero possible extraction benefit -- see MIN_REFINABLE_ALNUM_CHARS'
+    comment. Confirms the expensive path (_ocr_crop, patched here) is never even attempted for
+    them, while the region and its first-pass text/confidence survive unchanged."""
+    short_regions = [_region("="), _region("७"), _region("io"), _region("A")]
+    with patch("app.ocr.engine._ocr_crop") as mock_crop:
+        refined = _refine_regions_by_script(None, short_regions, ("eng", "hin", "guj"))
+    mock_crop.assert_not_called()
+    assert [r.text for r in refined] == [r.text for r in short_regions]
+
+
+def test_regions_at_or_above_the_char_floor_still_get_refined():
+    """The cutoff must not swallow real content -- a region with enough characters to plausibly
+    match an anchor or a NET_QTY_RE/MRP_VALUE_RE pattern still goes through refinement."""
+    long_region = _region("MRP Rs. 149")  # 9 alnum chars, well above the floor
+    assert sum(c.isalnum() for c in long_region.text) >= MIN_REFINABLE_ALNUM_CHARS
+    with patch("app.ocr.engine._ocr_crop", return_value=("MRP Rs. 149", 90.0)) as mock_crop, \
+         patch("app.ocr.engine._crop_region", return_value=None):
+        _refine_regions_by_script(None, [long_region], ("eng", "hin", "guj"))
+    mock_crop.assert_called()
