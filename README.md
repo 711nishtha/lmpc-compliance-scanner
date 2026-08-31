@@ -59,9 +59,20 @@ python -m uvicorn app.main:app --reload --port 8000
 API docs at `http://localhost:8000/docs`. SQLite DB is created automatically at `backend/data/compliance.db`.
 
 **OCR requires the Tesseract binary** (with `eng`, `hin`, `guj` language packs) installed
-separately — it is not bundled. Without it, the `/api/scans` upload endpoint returns a clear
-503 rather than fabricating results; the rule engine, extraction, reports, auth, dashboard, and
-repository endpoints all work without it.
+separately — it is not bundled with the `pip install` path above. Without it, the `/api/scans`
+upload endpoint returns a clear 503 rather than fabricating results; the rule engine, extraction,
+reports, auth, dashboard, and repository endpoints all work without it.
+
+**To scan without installing Tesseract locally, run the backend via Docker instead** — the image
+bundles Tesseract with all three language packs, so this is the one-command path to a fully
+working scan endpoint on a machine with nothing but Docker installed:
+```bash
+cd backend
+docker build -t lmpc-backend .
+docker run -p 8000:8000 -e JWT_SECRET=$(python -c "import secrets; print(secrets.token_urlsafe(32))") lmpc-backend
+```
+Then point the frontend (below) or `curl`/Swagger at `http://localhost:8000` as usual. This is
+the same image the Render deployment runs, so behaviour matches the live demo exactly.
 
 ### Frontend
 ```bash

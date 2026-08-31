@@ -27,6 +27,48 @@ def test_extracts_net_quantity_and_infers_category():
     assert d.commodity_category == "solid"
 
 
+def test_mrp_anchor_does_not_match_substring_of_an_unrelated_word():
+    """Real bug, found from a live deployed scan on an actual Maggi photo: naive substring
+    matching found the MRP anchor 'rs' inside 'teenage-RS' and reported '16' (from '16+17 year
+    old teenagers') as the MRP. _region_matches_anchor now requires letter-adjacency, not just
+    substring containment."""
+    regions = [region("16+17 year old teenagers (ICMR, 2020)")]
+    d = extract_declarations(regions)
+    assert not d.mrp_value.found
+
+
+def test_net_quantity_does_not_match_inside_ocr_noise():
+    """Real bug, found from the same deployed scan: a garbled noise region ('looo290l', likely a
+    mangled fragment near a licence number) matched the net-quantity pattern via its trailing
+    bare 'l' unit, reporting '290' as the net quantity when the real label said '70 g'. A genuine
+    quantity is never welded directly onto other characters with no separation."""
+    regions = [region("looo290l")]
+    d = extract_declarations(regions)
+    assert not d.net_quantity_value.found
+
+
+def test_consumer_care_phone_does_not_match_a_licence_number():
+    """Real bug, found from the same deployed scan: a licence number ('1001202500032', shape-
+    identical to a phone number) got reported as the consumer-care phone. Covers both the
+    explicit-keyword case and the case where OCR dropped the leading 'L' from 'Lic.' leaving a
+    bare 'No.' prefix with no recognisable keyword left."""
+    d1 = extract_declarations([region("Lic. No, 1001012000180")])
+    assert not d1.consumer_care_phone.found
+    d2 = extract_declarations([region("ic No, 1001012000180")])  # leading "L" dropped by OCR
+    assert not d2.consumer_care_phone.found
+
+
+def test_consumer_care_phone_prefers_a_real_phone_shape_over_a_bare_licence_number():
+    """When a genuine phone-shaped number (a 1800 toll-free, in this case) exists anywhere on
+    the label, it must win over an unattributed licence number with no distinguishing context in
+    its own OCR region -- exactly the shape of the real deployed-scan failure once the obvious
+    keyword/'.No' guards were exhausted."""
+    regions = [region("1001206200002"), region("1800 100 1947")]
+    d = extract_declarations(regions)
+    assert d.consumer_care_phone.found
+    assert d.consumer_care_phone.value == "1800 100 1947"
+
+
 def test_net_quantity_survives_ml_misread_as_mi():
     """Real production bug, found on a live deployed scan (not a hypothetical): Tesseract
     genuinely OCR'd a label's '500 ml' as region.text == '500 mi' (l -> i, a very common single-
