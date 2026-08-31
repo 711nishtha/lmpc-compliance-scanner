@@ -142,15 +142,18 @@ def _normalize_unit_ocr_noise(s: str) -> str:
 _LETTER_CLASS = "A-Za-zऀ-ॿ઀-૿"
 
 
-def _compile_anchor_terms() -> dict[str, list[re.Pattern]]:
-    compiled: dict[str, list[re.Pattern]] = {}
+def _compile_anchor_terms() -> dict[str, list[tuple[re.Pattern, str]]]:
+    compiled: dict[str, list[tuple[re.Pattern, str]]] = {}
     for group, lang_terms in ALL_ANCHOR_GROUPS.items():
         patterns = []
         for terms in lang_terms.values():
             for term in terms:
-                patterns.append(re.compile(
-                    rf"(?<![{_LETTER_CLASS}]){re.escape(term)}(?![{_LETTER_CLASS}])",
-                    re.IGNORECASE,
+                patterns.append((
+                    re.compile(
+                        rf"(?<![{_LETTER_CLASS}]){re.escape(term)}(?![{_LETTER_CLASS}])",
+                        re.IGNORECASE,
+                    ),
+                    term,
                 ))
         compiled[group] = patterns
     return compiled
@@ -158,9 +161,65 @@ def _compile_anchor_terms() -> dict[str, list[re.Pattern]]:
 
 _ANCHOR_PATTERNS = _compile_anchor_terms()
 
+# Real bug, found from a live deployed scan -- and this is the SECOND independent case this
+# session of one stray OCR character breaking an exact anchor match (the first was NET_QTY_RE's
+# "ml"/"mi" confusion): "Marketed by" was OCR'd as "Matketed by" (a single r->t substitution) on
+# a real Maggi photo, and the exact-match anchor above correctly, but unhelpfully, refused to
+# recognise it -- manufacturer_name came back "not found" despite the real declaration being
+# legible to a human at a glance. Short anchor terms ("rs", "mrp") deliberately do NOT get this
+# treatment: fuzzy-matching a 2-3 character term is how the ORIGINAL "teenagers" bug would
+# reappear in a new shape (almost any short word is within edit-distance-1 of some 2-3 char
+# anchor). Reserved for longer, multi-word phrases where a one-character edit is a small
+# fraction of the term and collision risk against unrelated real words is low.
+_FUZZY_MIN_TERM_LEN = 10
+
+
+def _levenshtein_at_most(a: str, b: str, max_dist: int) -> bool:
+    """True if edit distance between a and b is <= max_dist. Bails out early once every entry
+    in the current DP row exceeds max_dist, since no shorter path can recover from there --
+    keeps this cheap even though it runs per anchor-term per region."""
+    if abs(len(a) - len(b)) > max_dist:
+        return False
+    prev = list(range(len(b) + 1))
+    for i, ca in enumerate(a, 1):
+        cur = [i] + [0] * len(b)
+        for j, cb in enumerate(b, 1):
+            cost = 0 if ca == cb else 1
+            cur[j] = min(prev[j] + 1, cur[j - 1] + 1, prev[j - 1] + cost)
+        if min(cur) > max_dist:
+            return False
+        prev = cur
+    return prev[-1] <= max_dist
+
+
+def _fuzzy_contains(text: str, term: str, max_dist: int = 1) -> bool:
+    """Slides a window of term's length (+/- max_dist, to also tolerate one insertion/deletion)
+    across text and accepts if any window is within max_dist edits of term. Windows are checked
+    at LETTER-adjacent-safe boundaries only (reusing the same principle as the exact match) so
+    this can't match a term as a fuzzy substring of a much longer unrelated word either."""
+    text_lower, term_lower = text.lower(), term.lower()
+    n = len(term_lower)
+    for width in range(max(1, n - max_dist), n + max_dist + 1):
+        for start in range(0, len(text_lower) - width + 1):
+            end = start + width
+            before = text_lower[start - 1] if start > 0 else ""
+            after = text_lower[end] if end < len(text_lower) else ""
+            if before and before.isalpha() or after and after.isalpha():
+                continue
+            if _levenshtein_at_most(text_lower[start:end], term_lower, max_dist):
+                return True
+    return False
+
 
 def _region_matches_anchor(region: OcrRegion, group: str) -> bool:
-    return any(p.search(region.text) for p in _ANCHOR_PATTERNS[group])
+    text = region.text
+    for pattern, term in _ANCHOR_PATTERNS[group]:
+        if pattern.search(text):
+            return True
+    for _pattern, term in _ANCHOR_PATTERNS[group]:
+        if len(term) >= _FUZZY_MIN_TERM_LEN and _fuzzy_contains(text, term):
+            return True
+    return False
 
 
 def _find_anchor_region(regions: list[OcrRegion], group: str) -> OcrRegion | None:

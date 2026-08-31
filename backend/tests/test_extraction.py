@@ -27,6 +27,40 @@ def test_extracts_net_quantity_and_infers_category():
     assert d.commodity_category == "solid"
 
 
+def test_manufacturer_anchor_tolerates_a_single_character_ocr_misread():
+    """Real bug, found from a live deployed scan on a real Maggi retake: OCR read 'Marketed by'
+    as 'Matketed by' (a single r->t substitution) and the exact-match anchor correctly, but
+    unhelpfully, refused to recognise it -- manufacturer_name came back 'not found' despite being
+    legible to a human at a glance. Second independent case this session of one stray character
+    breaking an exact match (the first was NET_QTY_RE's 'ml'/'mi' confusion)."""
+    regions = [region("Matketed by: Nestle India Limited, 100/101, World Trade Centre")]
+    d = extract_declarations(regions)
+    assert d.manufacturer_name.found
+    assert "Matketed" in d.manufacturer_name.value
+
+
+def test_fuzzy_matching_recovers_tax_inclusive_wording_from_an_ocr_misread():
+    """Second, welcome side-effect of the same fuzzy-matching fix, found while re-verifying the
+    local demo baseline: demo_data/03_undersized_mrp_font.png's real OCR text is 'inci. of all
+    taxes' (a single l->i misread of 'incl.'). Before fuzzy matching, this was a FALSE FAIL --
+    'required wording missing' -- when the wording is almost certainly genuinely printed and
+    just misread. Fuzzy tolerance correctly recognises it as the same declaration, downgrading
+    to an honest NEEDS_VERIFICATION (low OCR confidence) instead of a false accusation."""
+    regions = [region("MRP Rs. 25 inci. of all taxes", conf=48.4)]
+    d = extract_declarations(regions)
+    assert d.mrp_inclusive_of_taxes_stated.found
+
+
+def test_fuzzy_anchor_matching_does_not_reopen_the_short_term_collision():
+    """Short anchor terms ('rs', 'mrp') must NOT get fuzzy tolerance -- that is exactly how the
+    original 'teenagers' substring collision would reappear in a new shape, since almost any
+    short word sits within edit-distance-1 of some 2-3 character anchor. Fuzzy matching is
+    reserved for long, multi-word phrases only (_FUZZY_MIN_TERM_LEN)."""
+    regions = [region("16+17 year old teenagers (ICMR, 2020)")]
+    d = extract_declarations(regions)
+    assert not d.mrp_value.found
+
+
 def test_mrp_anchor_does_not_match_substring_of_an_unrelated_word():
     """Real bug, found from a live deployed scan on an actual Maggi photo: naive substring
     matching found the MRP anchor 'rs' inside 'teenage-RS' and reported '16' (from '16+17 year
