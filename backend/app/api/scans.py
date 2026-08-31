@@ -24,7 +24,7 @@ from app.db import get_db
 from app.extraction.fields import extract_declarations
 from app.models.orm import Product, Scan
 from app.ocr.engine import OcrUnavailableError, run_ocr
-from app.ocr.preprocess import preprocess
+from app.ocr.preprocess import cap_dimension, preprocess
 from app.reports.annotate import draw_annotations
 from app.reports.docx_export import generate_docx_report
 from app.reports.pdf import generate_pdf_report
@@ -108,11 +108,22 @@ async def create_scan(
     if image is None:
         raise HTTPException(400, "Could not decode uploaded image — is it a valid image file?")
 
+    # Cap resolution BEFORE anything else touches this image, including writing it to disk.
+    # A real phone photo (12MP+) with no cap measurably drove a single request past 350MB RSS
+    # once preprocessing, annotation, and Tesseract each held their own full-resolution copy --
+    # see app/config.py's MAX_PROCESSING_DIMENSION comment for the measured numbers. Every array
+    # derived from `image` from this point on inherits the bound; the stored "original" is a
+    # touch smaller than the raw upload but still entirely clear to view, and preprocess() would
+    # have capped it internally anyway -- doing it here also means the file written to Render's
+    # ephemeral disk is smaller.
+    image, _cap_factor = cap_dimension(image)
+
     scan_uuid = uuid.uuid4().hex
     image_path = os.path.join(STORAGE_DIR, f"{scan_uuid}_original.jpg")
     cv2.imwrite(image_path, image)
 
     pre = preprocess(image)
+    del image  # everything downstream uses pre.final; drop the now-redundant reference
     preprocessed_path = os.path.join(STORAGE_DIR, f"{scan_uuid}_preprocessed.jpg")
     cv2.imwrite(preprocessed_path, pre.final)
 

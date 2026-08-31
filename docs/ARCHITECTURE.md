@@ -86,7 +86,7 @@ docs/
 
 ## 4. Pipeline
 
-`Image` → **preprocess** (deskew, CLAHE, upscale small text) → **OCR** (per-region language pick,
+`Image` → **resolution cap** (see below) → **preprocess** (deskew, CLAHE, upscale small text) → **OCR** (per-region language pick,
 confidence capture) → **extraction** (regex/keyword → `Declarations` object, each field carrying
 its source OCR bounding box + confidence) → **rule engine** (`Declarations` → list of `RuleResult`,
 each citing a row in LEGAL_REQUIREMENTS.md) → **report** (PDF/DOCX with itemized results,
@@ -96,6 +96,25 @@ raw OCR blob, `Declarations` JSON, list of `RuleResult` JSON, and both exported 
 The primary output at every stage is **itemized and cited**, never a single opaque score. A
 `compliance_score` is computed only as a secondary summary (`pass_count / applicable_count`) and
 is always rendered alongside — never instead of — the itemized checklist.
+
+### 4.1 Resolution cap — a real production incident, not a hypothetical
+
+`demo_data/`'s mockups are small (under 1200px, pre-cropped to just the label). A real phone
+photo of a whole product is a different shape of input entirely: 12–48MP, with the label
+occupying a small fraction of the frame. Deployed with no pixel-dimension cap (only upload byte
+size was capped), a real photo measurably drove a single request to **367 MB RSS** for
+preprocessing + one annotation copy + a real Tesseract pass — 72% of Render's free-tier 512 MB
+container — and OOM-killed the live instance mid-request.
+
+Fix: `app/ocr/preprocess.py::cap_dimension()` downscales immediately after decode, before any
+other processing, to `MAX_PROCESSING_DIMENSION` (2200px longest side, env-configurable);
+`upscale_if_needed()` additionally enforces an absolute output ceiling (`MAX_UPSCALED_DIMENSION`,
+3200px) independent of its relative-factor heuristic. Three intermediate full-resolution arrays
+(`deskewed`, `contrast_normalized`, the raw `original`) that a grep of the entire codebase
+confirmed had zero downstream consumers were also dropped from `PreprocessResult`. Measured
+after the fix, the identical scenario: **192 MB** (moderate case) / **295 MB** (worst-case 48MP
+photo) — see `backend/tests/test_memory_ceiling.py`, which locks this in with a real RSS
+measurement rather than a code-review assumption.
 
 ## 5. Font-size / readability: Tier 1 vs Tier 2 (see LEGAL_REQUIREMENTS.md §5)
 

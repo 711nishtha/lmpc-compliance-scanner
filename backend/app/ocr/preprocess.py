@@ -1,7 +1,20 @@
-"""Image preprocessing pipeline: deskew, contrast normalization, upscaling.
+"""Image preprocessing pipeline: resolution cap, deskew, contrast normalization, upscaling.
 
-Built as a visible, inspectable pipeline per the build spec — each stage returns the intermediate
-image so the API/UI can show "raw photo" vs "what we fed the OCR engine" side by side.
+Built as a visible, inspectable pipeline per the build spec: each stage is named and recorded
+in `stages_applied` so the API/report can state what was actually done to a given image.
+
+MEMORY DISCIPLINE — read before adding a new full-resolution intermediate array here.
+`PreprocessResult` used to also carry `original`, `deskewed`, and `contrast_normalized` as
+separate full-resolution ndarray fields, on top of `final`. A grep of the entire codebase
+(app/, tests/, frontend/src/) confirmed zero consumers of any of those three ever existed —
+they were pure dead weight, kept alive for the whole request by nothing but the dataclass
+itself. On a realistic simulated phone photo that measurably cost real memory (see
+app/config.py's MAX_PROCESSING_DIMENSION comment for the numbers). Only `final` is a real
+downstream dependency (OCR input, annotation base, stored preprocessed image, image
+dimensions) and is the only full-resolution array this module now retains past its own
+functions. If a "before vs after" debug view is ever built, generate a small preview
+thumbnail from `final`/the stored original at display time — do not resurrect a full-res
+field held for the whole request.
 """
 from __future__ import annotations
 
@@ -10,18 +23,34 @@ from dataclasses import dataclass, field
 import cv2
 import numpy as np
 
+from app.config import MAX_PROCESSING_DIMENSION, MAX_UPSCALED_DIMENSION
+
 MIN_TEXT_HEIGHT_PX_FOR_UPSCALE = 25
 
 
 @dataclass
 class PreprocessResult:
-    original: np.ndarray
-    deskewed: np.ndarray
-    contrast_normalized: np.ndarray
     final: np.ndarray
     upscale_factor: float = 1.0
     rotation_angle_deg: float = 0.0
+    resolution_cap_factor: float = 1.0
     stages_applied: list[str] = field(default_factory=list)
+
+
+def cap_dimension(image: np.ndarray, max_dim: int = MAX_PROCESSING_DIMENSION) -> tuple[np.ndarray, float]:
+    """Downscale so the longest side never exceeds `max_dim`. This is the PRIMARY memory fix:
+    called first, before any other processing, so every derived array inherits the bound —
+    rather than trying to chase memory down after the fact at each later stage.
+
+    INTER_AREA is the correct choice for shrinking (unlike INTER_CUBIC/LINEAR, it area-averages
+    rather than interpolates, which is both cheaper and less prone to aliasing on shrink)."""
+    h, w = image.shape[:2]
+    longest = max(h, w)
+    if longest <= max_dim:
+        return image, 1.0
+    factor = max_dim / longest
+    resized = cv2.resize(image, (int(w * factor), int(h * factor)), interpolation=cv2.INTER_AREA)
+    return resized, factor
 
 
 def _estimate_skew_angle(gray: np.ndarray) -> float:
@@ -80,36 +109,52 @@ def estimate_median_text_height_px(gray: np.ndarray) -> float | None:
     return float(np.median(heights))
 
 
-def upscale_if_needed(image: np.ndarray) -> tuple[np.ndarray, float]:
+def upscale_if_needed(
+    image: np.ndarray, max_upscaled_dimension: int = MAX_UPSCALED_DIMENSION
+) -> tuple[np.ndarray, float]:
     gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY) if image.ndim == 3 else image
     median_height = estimate_median_text_height_px(gray)
     if median_height is None or median_height >= MIN_TEXT_HEIGHT_PX_FOR_UPSCALE:
         return image, 1.0
     factor = min(3.0, MIN_TEXT_HEIGHT_PX_FOR_UPSCALE / max(median_height, 1.0))
+
     h, w = image.shape[:2]
+    # Absolute ceiling, independent of the relative factor above: a photo that is mostly blank
+    # background (a product shot at a distance, say) can legitimately compute a tiny median text
+    # height and therefore a near-3x factor -- capping the OUTPUT size here, not just the factor,
+    # is what actually bounds worst-case memory regardless of how the heuristic behaves.
+    longest_side = max(h, w)
+    if longest_side * factor > max_upscaled_dimension:
+        factor = max_upscaled_dimension / longest_side
+
     resized = cv2.resize(image, (int(w * factor), int(h * factor)), interpolation=cv2.INTER_CUBIC)
     return resized, factor
 
 
 def preprocess(image_bgr: np.ndarray) -> PreprocessResult:
     stages = []
-    deskewed, angle = deskew(image_bgr)
+
+    capped, cap_factor = cap_dimension(image_bgr)
+    if cap_factor < 1.0:
+        stages.append(f"resolution_cap(x{cap_factor:.3f})")
+
+    deskewed, angle = deskew(capped)
     if angle:
         stages.append(f"deskew({angle:.1f} deg)")
 
     contrast_normalized = normalize_contrast(deskewed)
     stages.append("clahe_contrast")
+    del deskewed  # no consumer beyond this point -- see module docstring on memory discipline
 
     final, factor = upscale_if_needed(contrast_normalized)
     if factor > 1.0:
         stages.append(f"upscale(x{factor:.2f})")
+    del contrast_normalized
 
     return PreprocessResult(
-        original=image_bgr,
-        deskewed=deskewed,
-        contrast_normalized=contrast_normalized,
         final=final,
         upscale_factor=factor,
         rotation_angle_deg=angle,
+        resolution_cap_factor=cap_factor,
         stages_applied=stages,
     )

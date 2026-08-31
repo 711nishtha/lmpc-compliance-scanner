@@ -17,6 +17,9 @@ pyjwt==2.13.0
 
 # Test / tooling
 pytest==9.1.1
+# Used by tests/test_memory_ceiling.py to measure real RSS, not assume it — see that file's
+# docstring for the production incident (Render OOM-kill on a real phone photo) it guards against.
+psutil==7.2.2
 
 # Used by scripts/ for reading primary-source Gazette PDFs (see docs/LEGAL_REQUIREMENTS.md §1.1)
 pypdf==6.16.2

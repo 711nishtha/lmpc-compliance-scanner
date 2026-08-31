@@ -73,6 +73,25 @@ CORS_ORIGINS = [
     if o.strip()
 ]
 
+# ---- Image processing resolution caps (ocr/preprocess.py) ------------------------------------
+# Real-world root cause, measured, not assumed: a phone photo of a whole product (bottle/packet
+# on a shelf, label filling ~3% of the frame -- not a pre-cropped label mockup like demo_data)
+# routinely decodes to 4000x3000+ px. With no cap, preprocess()'s upscale_if_needed could then
+# multiply that by up to 3x on EACH dimension, and every stage held its own full-resolution copy
+# simultaneously. Measured before this fix: preprocess() + one annotation copy + a real Tesseract
+# pass on a realistic simulated photo hit 367 MB RSS -- 72% of Render's free-tier 512 MB container,
+# before FastAPI's own baseline or PDF generation. That is the exact shape of the "memory limit
+# exceeded, instance restarted" failure.
+#
+# MAX_PROCESSING_DIMENSION caps the image immediately after decode, before ANY processing --
+# every downstream array inherits this bound. 2200px is generous for OCR: printed retail-label
+# text is legible at far lower effective DPI than a raw 12MP+ photo provides.
+MAX_PROCESSING_DIMENSION = int(os.environ.get("MAX_PROCESSING_DIMENSION", "2200"))
+# MAX_UPSCALED_DIMENSION is a second, independent ceiling on upscale_if_needed's OUTPUT, so a
+# pathological median-text-height estimate (e.g. a photo that is almost entirely blank
+# background) can never multiply its way past this regardless of the computed factor.
+MAX_UPSCALED_DIMENSION = int(os.environ.get("MAX_UPSCALED_DIMENSION", "3200"))
+
 # ---- Rate limiting (api/rate_limit.py) -------------------------------------------------------
 SCAN_RATE_LIMIT = int(os.environ.get("SCAN_RATE_LIMIT", "12"))          # requests
 SCAN_RATE_WINDOW_SECONDS = int(os.environ.get("SCAN_RATE_WINDOW_SECONDS", "60"))
