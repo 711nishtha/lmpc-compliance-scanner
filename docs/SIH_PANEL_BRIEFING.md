@@ -1,135 +1,104 @@
 # SIH26034 — Panel & DoCA Briefing Document
 
-**Prepared for:** SIH 2026 final panel, and a possible follow-up demonstration to officials
-of the Department of Consumer Affairs (DoCA), Ministry of Consumer Affairs, Food & Public
-Distribution, Government of India.
+**Who this is for:** the SIH 2026 final panel, and possibly officials from the Department of
+Consumer Affairs (DoCA), Ministry of Consumer Affairs, Food & Public Distribution.
 
-**Solution:** LMPC Compliance Scanner — a web application that scans packaged-commodity
-labels and validates declarations against the Legal Metrology (Packaged Commodities) Rules,
-2011, producing itemised, clause-cited compliance reports.
+**What we built:** LMPC Compliance Scanner — a web app that scans a photo of a packaged
+product's label and checks it against the Legal Metrology (Packaged Commodities) Rules, 2011,
+producing a report where every finding is tied to the exact rule it's checking.
 
-**Design principle governing this entire document, and the software:** never fabricate a
-legal verdict. Where a claim below is an estimate rather than a measured fact, it is labelled
-as one, with the reasoning shown. Where the software cannot verify something, it says so —
-this document holds itself to the same standard.
+**The one rule this whole project follows:** never fabricate a legal verdict. If something is
+an estimate, we say so. If the software can't verify something, it says "needs verification"
+instead of guessing. This document holds itself to the same standard.
 
 ---
 
-## TASK 1 — Problem Statement Coverage Audit
+## TASK 1 — How well do we cover the problem statement?
 
-Audited against SIH26034's stated background, "should be capable of" list, and expected
-solution, item by item.
+Checked item by item against what SIH26034 asked for.
 
-| # | PS Requirement | Status | Justification | What a panel might still probe |
+| # | What was asked | Status | Why | What a panel might push on |
 |---|---|---|---|---|
-| 1 | Scan **labels/images** | **FULLY MET** | Real OCR pipeline (Tesseract, eng+hin+guj), not a mockup — upload → preprocess → OCR → extraction → rule engine, end to end, tested against real product photos this build cycle. | Ask for a live scan of a product they hand you, not a pre-loaded demo. Be ready — this is your strongest card if it works, your biggest risk if it doesn't. |
-| 2 | Scan **listings** (e-commerce) | **PARTIALLY MET** | The `Declarations` schema is built to also accept a listing-text dump as an alternate input source with no schema change — but the UI does not ingest a listing today. This is a **documented, deliberate v1 scope decision**, not an oversight. | A sharp panelist will ask "so it doesn't do e-commerce today" — answer directly: correct, and explain why (see §3 below: label-photo compliance is the harder, higher-value problem to solve first; listing text is comparatively easy structured-text parsing once the rule engine and schema already exist). |
-| 3 | **Validate declarations** against Rules | **FULLY MET** | 14 itemised checks (verified against the current rule engine, not a stale figure), Rule 6 (mandatory declarations, R6-1..R6-11), Rule 7 (numeral height, R7-1/R7-2), Rule 8 (placement, R8-1/R8-2) — each returns PASS/FAIL/NEEDS_VERIFICATION/NOT_APPLICABLE with a clause citation. | Ask to see the rule engine cite its exact clause on screen — do it live, not from a slide. |
-| 4 | **Flag non-compliance** | **FULLY MET** | Every FAIL is evidenced with the extracted value, its OCR bounding box, and confidence. | — |
-| 5 | Check **readability / font size** | **PARTIALLY MET, honestly** | Two-tier: Tier 1 (no calibration) gives a *relative* signal only and never resolves to a hard PASS/FAIL; Tier 2 (user supplies a reference dimension) gives a real millimetre measurement against Table-I. | **This is the single most likely technical question you'll get** (see Q&A §5). Do not let the panel discover Tier 1's limits themselves — state it before they ask. |
-| 6 | Generate **compliance reports** | **FULLY MET** | Itemised PDF (ReportLab) with the annotated image and a methodology footer, plus an editable DOCX. | — |
-| 7 | **Repository + history** | **FULLY MET** | Every scan persisted with raw OCR, declarations JSON, rule-results JSON, all three image variants, and both report files. Searchable by text, status, date range. | — |
-| 8 | **Dashboard** for officials | **FULLY MET** (admin-only) | Total scans, status breakdown, 30-day trend, 10 most recent non-compliant scans needing follow-up. | Panel may want to see *targeting* logic (e.g. "show me the worst offenders by category") — you have status + recency, not yet category/brand aggregation. Say so if asked. |
-| 9 | **Web/mobile app** | **PARTIALLY MET** | Responsive web app, works on a mobile browser. **Not** a native mobile app — no offline capture, no native camera integration beyond the browser's file picker. | If asked "is there an app": no, and say why that's a reasonable v1 call — a PWA/native wrapper is a packaging decision on top of an already-working web backend, not a redesign. |
-| 10 | **Automated extraction** | **FULLY MET** | Regex/keyword-anchored structured extraction, each field with its own OCR bounding box + confidence — no manual data entry step. | — |
-| 11 | **Rule-based validation** | **FULLY MET** | Explicitly rule-based, not ML-classifier-based — every verdict traces to a clause, which is a **defensibility feature**, not a limitation (see §5, "why not an LLM"). | — |
-| 12 | **Search / retrieval** | **FULLY MET** | Repository search endpoint, filterable. | — |
-| 13 | **Technical docs** | **FULLY MET** | `docs/ARCHITECTURE.md`, `docs/LEGAL_REQUIREMENTS.md` (source-cited legal checklist with confidence tags), `docs/DEPLOYMENT.md`. | This is unusually strong for a hackathon submission — lead with it if the panel includes anyone technical. |
-| 14 | **Role-based auth** | **FULLY MET** | JWT + bcrypt, inspector/admin roles, dashboard admin-gated. | — |
+| 1 | Scan **labels/images** | **Done** | Real OCR (Tesseract, English+Hindi+Gujarati), not a mockup — upload → clean up image → OCR → extract fields → check rules, tested on real product photos. | Ask them to hand you a product to scan live. This is your strongest moment if it works. |
+| 2 | Scan **e-commerce listings** | **Partly done** | The data model already supports listing text as an input with no redesign — but the UI doesn't accept one yet. This was a deliberate v1 choice. | If asked "does it do e-commerce": say yes, honestly not yet, and explain why (§3 — the physical label is the harder, more valuable problem, so we solved that first). |
+| 3 | **Check declarations** against the Rules | **Done** | 14 checks covering Rule 6 (mandatory declarations), Rule 7 (font size), Rule 8 (placement) — each one returns PASS/FAIL/NEEDS VERIFICATION with the exact clause it's checking. | Show the rule engine citing its clause live, not on a slide. |
+| 4 | **Flag violations** | **Done** | Every FAIL comes with the extracted text, where it was found on the image, and how confident the OCR was. | — |
+| 5 | Check **font size / readability** | **Partly done, and we say so** | Two tiers: Tier 1 (no setup needed) gives a relative comparison only, never a hard PASS/FAIL. Tier 2 (inspector enters one real measurement) gives an actual millimetre check. | **Most likely tough question you'll get** — bring it up yourself before they ask (see Q2). |
+| 6 | Generate **reports** | **Done** | A PDF (with the annotated photo) and an editable Word doc. | — |
+| 7 | **Repository + history** | **Done** | Every scan is saved — raw OCR text, extracted fields, results, all images, both report files. Searchable by text, status, date. | — |
+| 8 | **Dashboard** for officials | **Done** (admin only) | Total scans, pass/fail breakdown, 30-day trend, 10 most recent non-compliant scans. | They may ask for smarter targeting (e.g. worst offenders by brand) — we have recency, not that yet. Say so. |
+| 9 | **Web/mobile app** | **Partly done** | Works fine on a mobile browser. Not a native app — no offline mode, uses the browser's normal file picker for the camera. | If asked "is there an app": no, and that's a reasonable choice — wrapping a working web backend into a native app is packaging, not a rebuild. |
+| 10 | **Automatic extraction** | **Done** | Every field is pulled out automatically with its own location and confidence — no manual typing. | — |
+| 11 | **Rule-based checking** | **Done** | Every verdict traces back to one exact clause — a strength, not a weakness (see Q8, why not an LLM). | — |
+| 12 | **Search** | **Done** | Full search on the repository. | — |
+| 13 | **Documentation** | **Done** | Architecture doc, a source-cited legal reference doc, a deployment guide. | Unusually thorough for a hackathon — lead with it for a technical judge. |
+| 14 | **Role-based login** | **Done** | Password login with inspector/admin roles; dashboard is admin-only. | — |
 
-### Where we might be over- or under-claiming
+### Where we might be over- or under-selling ourselves
 
-- **Not overclaiming:** the honesty-by-construction design (NEEDS_VERIFICATION as a first-class
-  status, Tier 1/Tier 2 split, DRAFT-flagged legal doc) means the software's own outputs are
-  more conservative than the marketing copy of most compliance tools. If anything this project
-  **under-sells** itself in a pitch context — a panel unfamiliar with the domain may read
-  "NEEDS_VERIFICATION" as weakness rather than rigor. **Frame it explicitly as the opposite.**
-- **A gap a DoCA official would notice immediately:** exemptions (Rule 26 — packages ≤10g/ml,
-  fast food sold by restaurants, Drugs Price Control Order formulations, farm produce >50kg,
-  and pan masala's 2025 carve-out) are **not auto-applied**. A real inspector scanning a 5g
-  sachet would get a FAIL the Rules never intended. This is documented, but a DoCA reviewer
-  will find it in under a minute of testing — **raise it yourself, first.**
-- **A gap a technically literate judge would notice:** R8-1 (placement/grouping) is a 2D
-  bounding-box proximity proxy for "same principal display panel," not a true multi-panel
-  reconstruction. This is disclosed in every report's methodology footer — which is the right
-  call, but be ready to explain *why* 2D clustering is a reasonable proxy rather than a hack
-  (see Q&A).
+- **We're probably under-selling it.** Being honest about uncertainty (NEEDS VERIFICATION,
+  the Tier 1/2 split) can look like weakness to someone unfamiliar with the space, when it's
+  actually the opposite — most compliance tools would just guess. Frame it that way out loud.
+- **A DoCA official will spot this in a minute:** small-package exemptions (Rule 26 — packs
+  under 10g/10ml, restaurant food, certain drug formulations, farm produce over 50kg, pan
+  masala's 2025 exemption) aren't applied automatically yet. A tiny sachet would wrongly get a
+  FAIL. It's documented — raise it yourself first.
+- **A technical judge will spot this:** the placement check (are all declarations grouped
+  together) works by measuring distance on the 2D photo, not by truly understanding panel
+  layout. We say so in every report. Be ready to explain why that's still a reasonable
+  approach, not a shortcut.
 
 ---
 
 ## The Briefing
 
-### 1. What happens in the real world today
+### 1. How this actually works in the real world today
 
-**Who enforces this.** The Legal Metrology Act, 2009 is administered centrally by DoCA, but
-**day-to-day enforcement is a state subject** — each state/UT runs its own Legal Metrology
-(Weights & Measures) directorate. The organisational structure is a three-tier field
-hierarchy: **Inspectors** (Section 14 of the Act) at the taluk/district level do the physical
-inspection and booking of offences; **Assistant Controllers** supervise at district level;
-**Controllers/Deputy Controllers** sit at state headquarters.
+**Who enforces this.** The Legal Metrology Act, 2009 is a central law, but day-to-day
+enforcement is done by each state's own Legal Metrology department. Inspectors do the physical
+checking, Assistant Controllers supervise them, and Controllers sit at the state level.
 
-**The scale mismatch is real and severe, though no single national inspector-count figure is
-publicly published** (we searched; DoCA/state annual reports don't appear to aggregate it in
-one place, so we reason from proxies rather than assert a number we don't have):
-- A real, cited example: Andhra Pradesh's Nellore Zone runs **one Deputy Controller, three
-  Assistant Controllers, and seven Inspectors** covering an entire multi-district zone.
-- State recruitment drives for Inspector of Legal Metrology posts typically run **14-17
-  vacancies per state per cycle** (Assam 2025: 14 posts; West Bengal 2020: 17 posts) — these
-  are the entire *new hire* batches for a state, not backlog fills.
-- Against this: India's FMCG sector alone has thousands of brands each running roughly
-  **200-2,000 active SKUs** per mid-market player, before counting pharmacy, hardware,
-  agricultural inputs, and every other packaged-commodity category the Rules cover, and
-  before counting the same product re-skinned across regional-language label variants. **We
-  are not aware of a published, defensible national total SKU count**, and we won't invent
-  one — but the order-of-magnitude gap between "single-digit inspectors per zone" and "every
-  packaged SKU on every shelf in that zone" is the entire reason manual-only inspection cannot
-  scale, and is the plain, undisputed premise of the problem statement itself.
+**The staffing gap is real, even without one clean national number** (we looked — no single
+published figure exists, so here's what we found instead):
+- Andhra Pradesh's Nellore Zone runs on **one Deputy Controller, three Assistant Controllers,
+  and seven Inspectors** for an entire multi-district zone.
+- States typically hire only **14-17 new Inspectors per recruitment cycle** (Assam 2025: 14;
+  West Bengal 2020: 17) — and that's the whole new-hire batch, not filling a backlog.
+- Meanwhile a single mid-size FMCG brand can carry **200-2,000 active products**, before
+  counting every other packaged-goods category and every regional label variant. We don't
+  have (and won't invent) a national product-count figure, but the gap between "a handful of
+  inspectors per zone" and "every product on every shelf" is exactly why manual-only
+  inspection can't keep up — that's the premise the problem statement itself is built on.
 
-**The manual inspection workflow, today:** an Inspector visits a retail premises (often
-triggered by a routine beat, a consumer complaint, or a targeted drive), physically examines
-package declarations against the Rules by eye (and, for font size, sometimes a physical
-scale), records findings on paper or a basic digital form, and — if a violation is found —
-initiates action.
+**How a manual check works today:** an Inspector visits a shop, checks the label by eye
+(sometimes with a physical ruler for font size), writes it down on paper or a basic form, and
+acts if something's wrong.
 
-**How a violation becomes a notice, and what happens next:**
-- **Compounding** — the more common path for first/minor offences. The Inspector can compound
-  the offence for a fee in lieu of prosecution, closing it administratively.
-- **Prosecution under Section 36** — for repeat or serious offences. The Act's actual penalty
-  structure (confirmed via primary/secondary legal sources, not assumed):
-  - **§36(1)** (declaration non-conformance): fine up to **₹25,000** (1st offence), up to
-    **₹50,000** (2nd), and **not less than ₹50,000 up to ₹1,00,000, or imprisonment up to 1
-    year, or both** (3rd and subsequent).
-  - **§36(2)** (net-quantity error): fine **₹10,000-50,000** (1st offence), rising to up to
-    **₹1,00,000 or imprisonment up to 1 year, or both** for repeat offences.
-  - Penalties apply **per package/consignment**, so exposure on a large non-compliant batch
-    is real, not nominal.
-- **Consumer-initiated escalation, outside the LM enforcement chain but adjacent to it:** a
-  consumer can call the **National Consumer Helpline (1915)**, DoCA's own grievance
-  mechanism — about **70% of NCH complaints close at that stage** (DoCA 2024-25 annual
-  report) without escalating further. Unresolved ones can go to a consumer commission via
-  **e-Daakhil** (launched by NCDRC in 2020; since 1 Jan 2025 merged into the unified
-  **e-Jagriti** platform, covering 444 commission locations nationwide). This is a
-  *parallel consumer-redress track*, not the LM enforcement track itself, but it matters here
-  because **a clause-cited compliance report is exactly the kind of evidence a consumer
-  commission or a compounding officer wants to see** — see §3.
+**What happens after a violation is found:**
+- **Compounding** — the common path for small/first offences: pay a fee, case closed
+  administratively.
+- **Prosecution** — for repeat or serious cases, under Section 36 of the Act:
+  - Wrong/missing declarations: fine up to ₹25,000 (1st offence), up to ₹50,000 (2nd), and
+    ₹50,000-1,00,000 or up to 1 year in jail (3rd+).
+  - Wrong net quantity: ₹10,000-50,000 (1st offence), rising to ₹1,00,000 or up to 1 year in
+    jail for repeats.
+  - These fines apply per package/batch, so a large non-compliant shipment adds up fast.
+- **Separately, consumers can complain too** — via the National Consumer Helpline (1915).
+  About 70% of those complaints get resolved at that stage without going further. The rest can
+  go to a consumer commission through the e-Jagriti platform (merged from e-Daakhil in 2025).
+  This is a different track from formal enforcement, but a clause-cited report from this tool
+  is exactly the kind of evidence that helps here too.
 
-**Marketplace liability for seller labels since 2020.** The Legal Metrology (Packaged
-Commodities) Amendment Rules made e-commerce entities responsible for displaying the same
-mandatory declarations online that a physical label carries (an amendment line dating to
-2017-18), while the **Consumer Protection (E-Commerce) Rules, 2020** separately clarified
-that a marketplace's *own* liability is limited when it functions purely as an intermediary
-(safe-harbour-style) — the primary declaration obligation still sits with the
-manufacturer/seller/importer. Net effect: marketplaces have real, but bounded, incentive to
-police listing content, which is exactly why our v1 chose to solve **the physical-label
-problem first** — it's where the compliance failure actually originates.
+**E-commerce sellers have their own rules since 2020** — marketplaces must show the same
+mandatory declarations online that the physical label carries, but a marketplace's own
+liability is limited when it's just hosting a listing; the seller/manufacturer stays
+responsible. That's part of why we chose to solve the physical-label problem first — that's
+where the compliance failure actually starts.
 
-**Common real-world violation patterns** (consistent with what our own rule engine checks,
-and with the patterns cited across the legal-compliance literature we reviewed): missing or
-incomplete manufacturer/packer/importer address; MRP declared without the mandatory "inclusive
-of all taxes" wording; missing or wrongly formatted manufacture/best-before dates; net
-quantity in a non-standard unit; undersized MRP or net-quantity print relative to the rest of
-the label; and, increasingly, absent or incomplete country-of-origin declarations on imported
-goods.
+**Common real violations** (consistent with what our rule engine checks): missing or
+incomplete manufacturer address; MRP shown without "inclusive of all taxes"; missing or badly
+formatted dates; net quantity in the wrong unit; MRP or net quantity printed too small; and,
+increasingly, missing country-of-origin on imported goods.
 
 **Sources:**
 [Section 36, Legal Metrology Act 2009 — IndianKanoon](https://indiankanoon.org/doc/28676169/) ·
@@ -144,456 +113,370 @@ goods.
 
 ---
 
-### 2. Market / stakeholder map
+### 2. Who this is for
 
-| Stakeholder | Relationship to this solution | Notes |
+| Who | How they relate to this | Notes |
 |---|---|---|
-| **State Legal Metrology / Weights & Measures departments** | **Primary user** — the Inspector and the supervising Controller are the two roles the app is built around. | This is the PS's literal target user — everything else is secondary. |
-| **DoCA (central)** | Policy owner, potential aggregator of a multi-state rollout, owner of the legal source-of-truth we cite. | The natural "phase 3" buyer (§4) — a central instance with state-level data feeding back into policy. |
-| **FSSAI** | Adjacent, not overlapping — FSSAI governs *food safety/labelling content* (nutrition, ingredients, allergens); Legal Metrology governs *quantity, price, and manufacturer-identity declarations*. A food package needs both regimes satisfied. | Worth naming explicitly in a Q&A — a panelist may conflate the two. We deliberately do not attempt FSSAI checks; scope stays Legal Metrology only. |
-| **BIS** | Adjacent — product *quality/safety standards*, not declaration format. No overlap with this tool's checks. | Mention only if asked; not a natural next-integration target. |
-| **FMCG in-house compliance/QA cells** | A plausible **secondary buyer**, not the PS's target — a large manufacturer could use this pre-market, as a self-check before a label goes to print, to catch the same errors DoCA would later catch. | This is real market validation for the *underlying engine*, even though the PS's ask is government-facing. Don't lead with it in front of DoCA (frame as "same engine, different customer," not a pivot). |
-| **Large retail chains** | Could use it for incoming-stock compliance spot-checks (a chain doesn't want non-compliant stock triggering an inspection at its own stores). | Speculative, not validated — present as a plausible extension, not a claim. |
-| **E-commerce platforms** | Have their own liability exposure (§1) and their own existing (closed, catalogue-text-based, largely English) compliance classifiers. Not a near-term customer for a government tool, but a comparison point (below). | |
-| **Packaging-artwork QA vendors** | Private-sector competitors, sort of — proofing tools that check artwork *before* print, generally paid SaaS, closed-source, and typically **not built against India-specific Legal Metrology clause citations** — they check general layout/readability, not "does this satisfy Rule 6(1)(a)". | This is the closest existing commercial category, and it's exactly the gap we don't fill the same way: we check a *photograph of a finished, printed package*, post-hoc, clause-cited — not artwork pre-press. |
+| **State Legal Metrology departments** | **The main user** — Inspectors and Controllers are who the app is built around. | This is literally who the problem statement asks us to serve. |
+| **DoCA (central)** | Sets the policy this is built on; a natural buyer for a multi-state version down the line. | Natural "phase 3" (see §4). |
+| **FSSAI** | Related but different — FSSAI checks food safety/nutrition labelling, we check quantity/price/manufacturer info. A food package needs both. | Worth clarifying if a panelist mixes the two up. We deliberately don't check FSSAI rules. |
+| **BIS** | Different again — product quality/safety standards, not label declarations. No overlap here. | Only mention if asked. |
+| **Brand compliance/QA teams** | A possible second customer, not who the problem statement targets — a manufacturer could use this to self-check labels before printing. | Real extra value, but don't lead with it in front of DoCA — same engine, different customer, not a pivot. |
+| **Large retail chains** | Could use it to spot-check incoming stock before it causes trouble in-store. | Just a plausible idea, not something we've validated. |
+| **E-commerce platforms** | Have their own liability and their own closed-source, text-based compliance checks already. Not a near-term customer, just a useful comparison. | |
+| **Packaging/artwork QA vendors** | The closest thing to a competitor — but they check artwork *before* printing, generally not tied to specific Indian Legal Metrology clauses. | We check a *photo of the finished, printed package*, after the fact, clause by clause — a different job. |
 
-**Where alternatives actually stand today, honestly:** on the government-enforcement side, we
-did not find evidence of an existing DoCA/state tool that does automated, clause-cited,
-photo-based compliance checking at the label level — the workflow described in §1 is manual.
-On the private side, marketplace-internal classifiers (Amazon/Flipkart-style) exist but are
-**closed, optimised for catalogue *text* fields the seller already typed in, not photo-based
-label OCR, and not built to cite Indian Legal Metrology clauses** — they're solving a
-different, narrower problem (does the *listing* look complete) rather than this one (does the
-*physical label*, as actually printed, satisfy the Rules). **This solution sits in a real,
-currently-unaddressed gap: government-facing, photo-first, clause-cited, multilingual.**
+**Is anyone already doing this?** On the government side, we didn't find an existing DoCA or
+state tool that does automatic, clause-cited, photo-based label checking — today it's manual.
+On the private side, marketplace tools (Amazon/Flipkart-style) exist, but they check the
+**text a seller typed into a listing**, not a photo of the actual label, and they're not tied
+to Indian Legal Metrology clauses. **This is a real, currently-unfilled gap: government-facing,
+works from a photo, cites the exact law, and reads multiple languages.**
 
 ---
 
-### 3. Impact of our solution — in depth
+### 3. What difference this actually makes
 
-**First-order effects (direct, on the inspection act itself):**
+**Direct effects, on the inspection itself:**
 
-- **Inspector time per pack.** A manual check against 14 declaration/placement points plus font-size
-  eyeballing plausibly runs several minutes per package when done carefully (reading every
-  declaration, checking placement, doing basic arithmetic on unit pricing). A photo-to-report
-  cycle on this tool runs on the order of **1-5 seconds of OCR processing** (measured on real
-  product photos this build cycle, hardware-dependent) plus the time to take the photo — call
-  it **under a minute, inclusive of photography**, for a *first pass* that an inspector then
-  reviews rather than performs from scratch. This is a **reasoned estimate**, not a controlled
-  time-motion study against real inspectors — we have not run one, and say so plainly rather
-  than presenting a fabricated "10x faster" headline number.
-- **Throughput multiplier.** Directly follows from the above: if first-pass screening is
-  materially faster than a from-scratch manual check, one inspector can screen materially more
-  packages per shift, reserving full manual scrutiny for what the tool flags rather than
-  everything.
-- **Consistency/objectivity.** A regex/keyword rule engine applies the *same* clause test to
-  every package, every time — it cannot have an off day, skip a step under time pressure, or
-  vary between two inspectors checking the same product differently. This is a genuine,
-  structural gain independent of raw speed.
+- **Time per package.** A careful manual check — 14 declaration/placement points plus
+  eyeballing font size — plausibly takes several minutes. This tool processes a photo in
+  **1-5 seconds** (measured on real product photos), so the whole thing, photo included, is
+  **under a minute** for a first pass an inspector then reviews. This is a reasonable estimate,
+  not a formal study against real inspectors — we haven't run one, and we're not claiming a
+  made-up "10x faster" number.
+- **More packages checked per shift.** Follows directly: if the first pass is faster, one
+  inspector can screen more products, saving deep manual review for what the tool actually
+  flags.
+- **Consistency.** A rule engine checks every package the same way, every time. It doesn't get
+  tired, skip a step, or judge two identical products differently. That's a real gain on its
+  own, separate from speed.
 
-**Second-order effects (downstream of the report existing at all):**
+**Knock-on effects, once the report exists:**
 
-- **Defensibility in a compounding hearing or consumer forum.** A report that states "R6-7,
-  Rule 6(1)(e): MRP found as evidence-string '₹90', but the required 'inclusive of all taxes'
-  qualifier is absent" is a fundamentally stronger administrative record than an inspector's
-  handwritten note — it is reproducible, timestamped, image-evidenced, and clause-cited. This
-  is exactly the kind of record that holds up when a compounding decision or a consumer-forum
-  filing gets challenged.
-- **Audit trail / repository value.** Every scan is a permanent, searchable record — which
-  means a supervising Controller can, for the first time, query "show me every non-compliant
-  scan in the last 30 days" rather than relying on paper files scattered across field offices.
-- **Dashboard value for supervisory targeting.** The current dashboard (status breakdown,
-  30-day trend, recent non-compliant scans) is a first cut at what could become real
-  targeting intelligence — e.g., a Controller noticing a spike in a particular violation type
-  or geography and directing inspection resources there. **We have this at the "recent list"
-  level today; category/brand-level aggregation for true targeting is a natural v2, not yet
-  built** — say so if asked, don't imply it exists.
-- **Deterrence.** Speculative but directionally reasonable: if manufacturers know
-  label-declaration compliance can be checked quickly and consistently at scale, the marginal
-  incentive to cut corners on a declaration shifts. We make no claim to have measured this —
-  it would require a real deployment and a before/after study neither we nor, to our
-  knowledge, anyone else has run for a tool like this.
-- **Data feedback loop into DoCA policy.** Aggregated, anonymised violation-pattern data
-  (which clause fails most often, by category) is exactly the kind of evidence base DoCA would
-  want when deciding where the Rules themselves need tightening, clarifying, or where an
-  exemption threshold needs revisiting — this is a genuine, non-obvious second-order value the
-  PS doesn't ask for explicitly, but that a repository of clause-cited, structured violation
-  data naturally enables over time.
+- **Stronger evidence.** A report that says "MRP found as '₹90', but missing the required
+  'inclusive of all taxes' wording, Rule 6(1)(e)" holds up much better in a compounding hearing
+  or consumer case than a handwritten note — it's reproducible, timestamped, and cites the law.
+- **A real audit trail.** Every scan is saved and searchable, so a Controller can finally ask
+  "show me every non-compliant scan from the last 30 days" instead of digging through paper.
+- **Early-stage targeting for supervisors.** The dashboard already shows status and trends; a
+  Controller noticing a spike in one type of violation could send inspectors there. Aggregating
+  by brand or category is a natural next step, not built yet — say so if asked.
+- **Deterrence, probably, but unmeasured.** If brands know labels can be checked quickly and
+  consistently, that's some incentive to get it right the first time. We haven't measured this,
+  and doing so would need a real deployment and a before/after study nobody has run yet.
+- **Feeds back into policy.** Aggregated, anonymised data on which clause fails most often, and
+  where, is exactly the kind of evidence DoCA would want when deciding whether a rule needs
+  tightening or an exemption threshold needs revisiting.
 
-**The multilingual capability specifically.** Real Indian retail labels are frequently
-bilingual or trilingual (a national brand's Hindi-market pack, a regional Gujarati-market
-variant) — an English-only OCR/compliance tool simply cannot read the declaration on a large
-share of real shelf stock. Running Tesseract's eng+hin+guj combined model with a per-line
-dominant-script selection pass is what makes this tool applicable to the labels India
-*actually* prints, not just the subset that happens to be in English. This is a coverage gain,
-not a cosmetic feature — an English-only tool would silently fail (or worse, silently
-misread) a meaningful fraction of the real label population this is meant to check.
+**Why multiple languages matters.** Real Indian labels are often bilingual or trilingual — a
+Hindi-market pack, a Gujarati-market variant of the same product. An English-only tool would
+simply fail to read a large chunk of real shelf stock. Running Tesseract across
+English+Hindi+Gujarati, picking the right script line by line, is what makes this usable on
+labels India actually prints — not a nice-to-have.
 
-**Where impact is honestly limited, stated plainly:**
+**Where the impact is honestly limited:**
 
-- **Font-size (Rule 7) impact is capped at Tier 1 (a relative signal) unless the inspector
-  supplies a physical reference dimension.** A definitive millimetre-accurate Rule 7
-  PASS/FAIL is only possible with Tier 2 calibration — this is a genuine constraint of
-  deriving physical measurements from an uncalibrated photograph, not a solvable software gap.
-- **Exemptions are not auto-applied** (§1 audit) — every scan of a genuinely exempt small
-  package currently returns a misleading FAIL unless the inspector already knows to discount
-  it. This is a real, near-term-fixable gap (an exemptions lookup + inspector confirmation
-  step), not yet built.
-- **E-commerce listing scanning is v1-absent** — impact on the *online* half of the retail
-  market is zero today, only on physical/photographed labels.
+- **Font-size checking stays a relative signal (Tier 1)** unless the inspector provides one
+  real measurement (Tier 2). A confident, millimetre-accurate verdict needs that input — this
+  is a real limit of measuring physical size from an uncalibrated photo, not something more
+  code can fix.
+- **Exemptions aren't applied automatically yet** (§1) — a genuinely exempt small package can
+  still come back as a misleading FAIL today unless the inspector already knows to ignore it.
+  Fixable, just not built yet.
+- **E-commerce listings aren't scanned yet** — zero impact on the online half of retail today,
+  only on photographed physical labels.
 
 ---
 
-### 4. What production looks like
+### 4. What running this for real would look like
 
-**Rollout phasing — deliberately staged, not a big-bang national launch:**
+**Rollout — staged, not a big national launch on day one:**
 
-1. **Phase 1 — single-state pilot.** One state Legal Metrology directorate, a handful of
-   Inspectors, real field use against real inspection drives, with every NEEDS_VERIFICATION
-   and every disputed FAIL logged and reviewed manually to build a real accuracy baseline
-   against real (not synthetic) field photography — the honest gap this build cycle
-   surfaced repeatedly (see §5, "what's your evidence").
-2. **Phase 2 — case-management integration.** Once the pilot's accuracy and workflow fit are
-   validated, integrate report output into whatever case/violation-tracking system the state
-   already uses, so a FAIL can flow directly into a compounding-notice or prosecution
-   workflow rather than living only in this tool's own repository.
-3. **Phase 3 — DoCA central instance + e-commerce ingestion.** A central, multi-state
-   instance for aggregated policy-feedback data (§3), and the e-commerce listing-scan path
-   the schema already supports, built out into the UI.
+1. **Phase 1 — one state, pilot.** A single state's Legal Metrology department, a few
+   Inspectors, real field use, every uncertain or disputed result logged and manually reviewed
+   to build a real accuracy baseline from real field photos — the honest gap we kept running
+   into this build cycle (see Q1).
+2. **Phase 2 — plug into case management.** Once the pilot proves accurate and usable, feed
+   report output into whatever system the state already uses to track violations, so a FAIL
+   can flow straight into a compounding notice instead of just sitting in our own repository.
+3. **Phase 3 — a central DoCA instance, plus e-commerce.** One instance aggregating data across
+   states for policy feedback, and building out the e-commerce listing-check path the data
+   model already supports.
 
-**Infra footprint and cost — genuinely low, and this is a real structural advantage:**
+**Running cost — genuinely low, and that matters:**
 
-- **No per-scan API cost.** Tesseract and the rule engine are both fully offline/open-source —
-  there is no OpenAI/Google-Vision-style per-call billing. Cost is **hosting only**: compute
-  for the OCR pipeline (CPU-bound, no GPU required) plus a database. This is a materially
-  different cost profile from any LLM-based alternative, and matters directly for a
-  government procurement context where a recurring per-transaction API bill is a real
-  budgetary and vendor-lock-in concern.
-- **Current deployment** (for the SIH demo): Render, Docker image bundling Tesseract with all
-  three language packs, Postgres. Free-tier for the hackathon; a real pilot would move to a
-  small always-on instance specifically to avoid free-tier cold-start behaviour, which is not
-  acceptable for field use.
-- **OCR compute cost, measured this build cycle:** roughly **1-5 seconds of CPU time per
-  scan** depending on photo resolution and label complexity, after a resolution-cap fix this
-  cycle brought a real-world worst case down from ~367MB peak memory to under 300MB — i.e.
-  this runs comfortably on a modest single instance, not a GPU cluster.
+- **No per-scan API bill.** Tesseract and the rule engine are both free and run entirely
+  offline — no OpenAI/Google-Vision-style charge per call. The only real cost is hosting:
+  compute (no GPU needed) plus a database. That's a very different, much more predictable cost
+  profile than any AI-API-based alternative, which matters a lot for government procurement.
+- **Current setup (for this demo):** Render, a Docker image with all three language packs
+  bundled, Postgres. Free tier for the hackathon; a real pilot would move to an always-on
+  instance to avoid free-tier cold starts, which wouldn't be acceptable in the field.
+- **Measured cost:** roughly 1-5 seconds of CPU time per scan, and a memory fix this cycle
+  brought the real-world worst case down from ~367MB to under 300MB — this runs comfortably on
+  one modest server, not a GPU cluster.
 
-**Scaling considerations, honestly:**
+**Scaling — the honest version:**
 
-- Rate limiting is currently **in-process**, correct for a single instance, and explicitly
-  **not** yet a multi-worker-safe design — moving to multiple workers needs a shared store
-  (Redis) for the rate limiter, documented as a known next step, not hidden.
-- Postgres plus a **persistent volume** for uploaded images/reports is required for anything
-  beyond a demo — the current free-tier deployment's storage is ephemeral (wiped on
-  restart), which is fine for a hackathon and explicitly **not** fine for a real pilot; this
-  is flagged in our own deployment docs, not discovered by surprise later.
-- At real multi-state volume, the natural next scaling move is a queue (upload → job →
-  result) rather than synchronous request/response, so a burst of uploads doesn't compete for
-  OCR CPU in real time — not built, reasoned about explicitly here as the honest next step.
+- Rate limiting currently lives in a single process — fine for one instance, not yet safe
+  across multiple workers, which would need a shared store like Redis. Known, documented, not
+  hidden.
+- A real pilot needs Postgres plus persistent storage for images/reports — the current
+  free-tier demo's storage gets wiped on restart, which is fine for a hackathon and clearly not
+  fine for real use. Already flagged in our own deployment notes.
+- At real multi-state volume, the natural next step is a job queue (upload → process later →
+  result) instead of making someone wait on the request — not built, but the obvious next move.
 
-**Data privacy / retention / security posture:**
+**Data privacy and security:**
 
-- Scanned images are of **product packaging**, not personal data — the privacy surface is
-  narrower than most government IT projects, but inspector identity, scan timestamps, and
-  location-adjacent metadata (product/scan context) are still real personal/operational data
-  needing a retention policy a real deployment would define with the state department, not
-  something a hackathon prototype should presume.
-- Auth is JWT + bcrypt, no hardcoded secrets (verified — the app refuses to start in
-  production without an explicit secret), CORS locked to known origins, upload validation
-  (file type + size) ahead of the OCR pipeline, rate limiting, and no stack traces or internal
-  paths ever returned to a client. This is real, already-implemented hardening, not a roadmap
-  item.
-- API docs (Swagger) are **off by default in production** and only enabled deliberately for
-  this demo, specifically so a real deployment doesn't leak its own schema as reconnaissance.
+- Scanned images are of packaging, not people — a narrower privacy surface than most
+  government IT projects. Inspector identity, timestamps, and scan context are still real data
+  that would need a retention policy agreed with the department, not something we'd assume.
+- Already built: bcrypt password hashing, JWT login with role separation, no hardcoded secrets
+  (the app refuses to start in production without one set), CORS locked to known origins,
+  upload validation, rate limiting, and no internal errors ever shown to the user. This is
+  already done, not a future promise.
+- API docs are off by default in production, only turned on deliberately for this demo, so a
+  real deployment doesn't expose its own API structure for free.
 
-**What breaks first at real scale, and the fix:**
-1. Free-tier cold starts → move to an always-on instance.
-2. Ephemeral storage → persistent volume / object storage.
-3. In-process rate limiter under multiple workers → Redis-backed limiter.
-4. Synchronous upload-to-result under burst load → background job queue.
-None of these are unknown-unknowns — all four are already identified and documented, which is
-itself the point: **this was built with production concerns in view from the start, even
-though the current deployment is intentionally a lightweight demo instance.**
+**What would break first at real scale, and the fix:**
+1. Free-tier cold starts → move to an always-on server.
+2. Storage wiped on restart → persistent storage.
+3. Single-process rate limiter → Redis-backed one, for multiple workers.
+4. Uploads processed synchronously → a background job queue under heavy load.
+None of this is a surprise — all four are already known and written down. That's the point:
+this was built with production in mind from the start, even though today's deployment is
+intentionally a lightweight demo.
 
-**The human-in-the-loop model, stated as policy, not just as a technical fallback:** this tool
-is built to **assist an Inspector's judgement, not replace it.** Every NEEDS_VERIFICATION
-result exists specifically to route a genuinely uncertain case to a human, and no output is
-positioned as a self-executing legal determination — the PDF report's own footer says so
-explicitly: *"This report is a decision-support tool for enforcement officials, not a final
-legal determination."*
+**This tool assists an Inspector — it doesn't replace one.** Every NEEDS VERIFICATION result
+exists to send a genuinely uncertain case to a human. Nothing here claims to be a final legal
+decision — the PDF report itself says so: *"This report is a decision-support tool for
+enforcement officials, not a final legal determination."*
 
 ---
 
-### 5. Anticipated Q&A
+### 5. Questions we expect, and honest answers
 
 **On accuracy and OCR**
 
-**Q1. How accurate is the OCR / what's your accuracy number?**
-We do not claim a single headline accuracy percentage, deliberately — publishing one figure
-from a small synthetic test set would itself be a form of overclaiming, exactly what this
-tool's design principle refuses to do. What we can state precisely: 96 automated tests pass,
-including a full walkthrough of 12 demo labels (3 in real Devanagari/Gujarati script, 1 with
-a deliberate placement violation) each verified to be flagged for the specific violation it
-was built to exercise; and, this build cycle, three independent real single-character OCR
-misreads were found from **actual re-photographed product labels** (not synthetic images),
-root-caused, and fixed with permanent regression tests. A real accuracy percentage against a
-statistically meaningful, real-world labelled test set is exactly what Phase 1 (§4) is
-designed to produce — we don't have that number yet, and won't invent one.
+**Q1. What's your accuracy number?**
+We're not giving one headline percentage — publishing a number from a small test set would
+itself be a kind of overclaiming, which is exactly what this tool is built to avoid. What we
+can say precisely: 119 automated tests pass, including a full run through 12 demo labels (3 in
+real Devanagari/Gujarati script, one with a deliberate placement violation), each correctly
+flagged for the exact violation it was built to test. This build cycle we also found and fixed
+several real bugs from **actual re-photographed products** (not synthetic images) — root-caused
+and locked in with permanent tests. A real accuracy number, from a real labelled test set, is
+exactly what Phase 1 (§4) is meant to produce — we don't have it yet and won't make one up.
 
 **Q2. How do you measure font size from a photo?**
-Two-tier, explicitly. Tier 1, always available: compares each declaration's detected
-text-height in pixels against the tallest text on the same label (typically the brand name) —
-a *relative* signal that catches the common real pattern of disproportionately tiny MRP/net-
-quantity print, but never resolves to a hard Rule 7 PASS/FAIL, because no physical unit was
-actually measured. Tier 2, opt-in: the inspector supplies one known physical dimension (e.g.
-package width in mm), which lets us compute pixels-per-mm and check the real millimetre height
-against Rule 7's Table-I. Every report states plainly which tier produced a given finding.
+Two tiers. Tier 1 (always on): compares each declaration's text height in pixels to the tallest
+text on the label — catches the common case of tiny MRP/net-quantity print, but never becomes
+a hard PASS/FAIL, since no real-world unit was measured. Tier 2 (opt-in): the inspector enters
+one known physical measurement (like the package width in mm), which lets us convert pixels to
+millimetres and check against the Rules' actual size table. Every report states plainly which
+tier produced a given result.
 
-**Q3. What if the label is curved / glare / low light?**
-Real, disclosed limitation. Preprocessing (deskew, CLAHE contrast normalisation, resolution-
-aware upscaling) helps with moderate cases, and low-confidence OCR regions correctly surface
-as NEEDS_VERIFICATION rather than a guessed value — but a badly glared or heavily curved
-photo can still degrade extraction quality. This is why the tool flags an "image quality"
-warning distinct from a compliance FAIL when confidence is too low across the board, so a bad
-photo is never mistaken for a non-compliant product.
+**Q3. What about a curved label, glare, or bad lighting?**
+A real, disclosed limitation. Image cleanup (straightening, contrast fixing, zooming in on
+small text) helps with moderate cases, and low-confidence readings correctly come back as
+NEEDS VERIFICATION instead of a guess — but a badly glared or heavily curved photo can still
+hurt accuracy. That's why we added a separate "image quality too low" result, so a bad photo
+is never mistaken for a non-compliant product.
 
-**Q4. How do you keep up with rule amendments?**
-`docs/LEGAL_REQUIREMENTS.md` tracks the amendment chain with explicit confidence tags per
-clause — `[VERIFIED-TEXT]` (confirmed against primary Gazette text), `[VERIFIED-SECONDARY]`
-(secondary legal sources only), `[VERIFY WITH DoCA]` (genuinely unconfirmed, and the rule
-engine returns NEEDS_VERIFICATION for anything in that category, never a fabricated
-PASS/FAIL). This is a living document by design — amendments through 2026 (the medical-device
-carve-out under GSR 778(E), the Rule 6(10A) e-commerce country-of-origin filter, the pan
-masala exemption) are already tracked in it. A real deployment would need this reviewed and
-signed off by DoCA's own legal team before any threshold is treated as final — we say that
-explicitly, we don't imply our own research substitutes for that review.
+**Q4. How do you keep up when the Rules change?**
+Our legal reference doc tracks every amendment with a confidence label per clause — confirmed
+against the primary legal text, confirmed only via secondary sources, or genuinely unconfirmed
+(in which case the rule engine always returns NEEDS VERIFICATION, never a guess). It's a living
+document — recent changes like the medical-device carve-out and the pan masala exemption are
+already tracked. A real deployment would need DoCA's own legal team to review and sign off
+before treating any of it as final — we say that outright, we don't treat our own research as
+a substitute for that.
 
-**Q5. Placement check — is 2D clustering really valid?**
-It's a disclosed **proxy**, not a certified determination, and every report says so in its
-methodology footer. Bounding-box proximity on a single 2D photograph cannot distinguish a
-genuinely separate panel from an unusual-but-single-panel layout with full certainty — true
-validation would need multi-angle capture or 3D reconstruction, out of scope for a phone-photo
-tool. What it *does* do reliably: flag the common real violation pattern of a declaration
-printed far from the rest of the mandatory group, which is the practical failure mode Rule 8
-exists to catch. R8-2 (the net-quantity clear-space check) is scale-invariant and needs no
-calibration, unlike R8-1 — worth distinguishing if pressed.
+**Q5. Is checking "are all the declarations grouped together" with 2D distance actually valid?**
+It's a disclosed stand-in, not a certified check, and every report says so. Measuring distance
+on a single 2D photo can't perfectly tell a genuinely separate panel from an unusual single-panel
+layout — real certainty would need multiple angles or 3D reconstruction, out of scope for a
+phone photo. What it does reliably do: catch the common real problem of a declaration printed
+far away from the rest of the group. The separate net-quantity clear-space check doesn't need
+any of this and works at any scale — worth mentioning if pushed on this.
 
-**On the human/legal/business model**
+**On the human, legal, and business side**
 
 **Q6. Can this replace inspectors?**
-No, and we don't design toward that. Every report explicitly states it is a decision-support
-tool, not a final legal determination. The value case (§3) is inspector *throughput* and
-*consistency*, not inspector *elimination* — Section 14 of the Act vests inspection authority
-in a human Inspector, and nothing here changes that.
+No, and it's not built to. Every report says clearly it's a decision-support tool, not a legal
+determination. The value (§3) is speed and consistency, not replacing the person — the law
+itself gives inspection authority to a human Inspector, and nothing here changes that.
 
-**Q7. What about legal liability if the tool is wrong?**
-This is exactly why NEEDS_VERIFICATION exists as a first-class status rather than a fallback —
-the tool is built to never assert a confident wrong answer where the underlying evidence is
-weak; it's built to say "uncertain" instead. The human Inspector remains the one who acts on a
-finding, reviews the evidence, and makes the legal determination — the tool's role is
-evidence-gathering and first-pass screening, not adjudication. Any real deployment would need
-this liability allocation formalised in whatever procurement/usage agreement covers it — that's
-a legal/policy step, not a software one, and we're explicit that we haven't done it.
+**Q7. Who's liable if the tool gets it wrong?**
+This is exactly why NEEDS VERIFICATION exists — the tool is built to say "uncertain" rather
+than confidently assert a wrong answer. The human Inspector still reviews the evidence and
+makes the actual legal call — the tool gathers evidence and does a first pass, it doesn't
+decide. A real deployment would need this liability question settled formally in a procurement
+agreement — that's a legal/policy step we haven't done, and we say so.
 
-**Q8. Why not use an LLM / GPT for extraction?**
-Deliberate v1 choice, documented, not a limitation we're unaware of. A rule-based, regex/
-keyword extraction pipeline is (a) fully offline, no per-call API cost or vendor dependency —
-material for a government deployment; (b) fully auditable — every extracted value traces to
-an exact OCR region and confidence, not a black-box model's internal reasoning; and (c)
-deterministic — the same photo produces the same result every time, which matters for
-something that may end up as evidence in a compounding hearing. An LLM-based extraction
-fallback is explicitly named as the natural v2 extension in our own architecture doc, for
-higher accuracy on unusual label layouts, at the honestly-stated cost of introducing an
-external API dependency this offline-first v1 deliberately avoids.
+**Q8. Why rules and regex instead of an LLM?**
+A deliberate choice, not something we overlooked. Rule-based extraction is: (a) fully offline,
+no per-call API cost or vendor lock-in — important for government use; (b) fully explainable —
+every value traces back to an exact spot on the image and a confidence score, not a black box's
+internal reasoning; (c) deterministic — the same photo gives the same result every time, which
+matters if this ever becomes evidence in a hearing. An LLM-based fallback for tricky layouts is
+a reasonable v2 idea, at the honest cost of adding an external API dependency this offline-first
+version deliberately avoids.
 
-**Q9. How do you handle bilingual and regional-language labels?**
-Tesseract's combined eng+hin+guj model does initial layout detection, then each merged text
-line is re-OCR'd against its dominant script specifically — a genuinely mixed-script line
-(e.g. a Hindi phrase next to a Latin email address) falls back to the combined model rather
-than risk one language mangling the other. Native-script numerals (Devanagari/Gujarati) are
-normalised back to Arabic digits before any value is parsed. This build cycle found and fixed
-a real case of the combined model hallucinating foreign-script glyphs on plain English text —
-fixed with evidence, tested, and deliberately **asymmetric** (an English-majority line can be
-cleaned up; a Gujarati-majority line with a legitimate Latin unit abbreviation is *not*
-forced to Gujarati-only, because that model literally cannot output the Latin characters a
-real "1000 ml" needs).
+**Q9. How do you handle Hindi and Gujarati labels?**
+Tesseract's combined model does the first pass, then each detected line is re-checked against
+its actual language specifically — a genuinely mixed-language line (say, Hindi text next to an
+English email address) falls back to the combined model rather than risk one language mangling
+the other. Native-script numerals get converted to normal digits before anything is parsed.
+This build cycle we also found and fixed a real case of the model hallucinating foreign
+characters into plain English text — fixed carefully so it only cleans up English-majority
+lines, never forces a Gujarati line with a real "1000 ml" into losing its Latin letters.
 
 **Q10. What about e-commerce listings?**
-Not in v1's UI, by deliberate scope decision — the schema already accepts listing text as an
-alternate input source with no redesign needed, but building that ingestion path out was
-judged lower-priority than getting label-photo compliance right first, since that's where
-consumer-facing declaration failures actually originate (a listing usually just repeats what's
-already printed, or is separately regulated by the 2017 e-commerce amendment and the 2020
-Consumer Protection E-Commerce Rules — see §1).
+Not in the UI yet — a deliberate scope call. The data model already accepts listing text as an
+alternate input with no redesign needed, but we prioritised getting label-photo checking right
+first, since that's where declaration failures actually start (a listing usually just repeats
+what's printed, and is separately covered by 2017/2020 e-commerce rules — see §1).
 
 **Q11. How is this different from what Amazon/Flipkart already do?**
-Marketplace-internal tools, where they exist, work on **catalogue text fields the seller
-typed in** — not on a photograph of the physical label, and not built to cite Indian Legal
-Metrology clauses specifically; they're closed-source, and their optimisation target is
-listing completeness/consistency, not enforcement-grade legal evidence. This tool is
-government-facing, photo-first (checks what's actually printed, not what a seller claims),
-multilingual, and every output cites the exact Rule/clause it's checking — a fundamentally
-different design target from a marketplace's internal QA classifier.
+Their tools, where they exist, check the **text a seller typed into a listing** — not a photo
+of the actual label — and aren't built to cite Indian Legal Metrology clauses; they're closed
+source, and their goal is listing completeness, not enforcement-grade evidence. This tool is
+government-facing, works from a photo of what's actually printed, reads multiple languages, and
+every result cites the exact rule — a genuinely different job.
 
-**Q12. Can a manufacturer game it?**
-In principle, yes, in the narrow sense that any rule-based system can be studied and its edge
-cases probed — that's true of manual inspection too. What raises the cost of gaming this
-specifically: every check cites its exact clause (so "gaming" one check doesn't imply gaming
-the underlying legal requirement, just this tool's detection of it), and a human Inspector
-remains the final decision-maker reviewing the evidence, not an automated pass/fail gate a
-manufacturer could tune against in isolation.
+**Q12. Could a manufacturer game the system?**
+In principle, any rule-based system's edge cases can be studied and probed — true of manual
+inspection too. What raises the cost of trying: every check cites its exact legal clause, so
+gaming one check doesn't mean gaming the actual law behind it, and a human Inspector still
+reviews the evidence and makes the final call, not an automated gate a manufacturer could tune
+against alone.
 
-**Q13. Data security and who owns the scanned data?**
-Architecturally, the deploying state department would own its data — this is a self-hosted
-tool (Docker image, Postgres), not a SaaS product that retains scan data on our own
-infrastructure. Current hardening: bcrypt password hashing, JWT auth with role separation, no
-hardcoded secrets (the app refuses to start in production without one), CORS locked to known
-origins, upload validation, rate limiting, and no internal error detail ever surfaced to a
-client. A real deployment's data-retention and access-control policy would be defined jointly
-with the department, not unilaterally by us.
+**Q13. Who owns the scanned data, and how secure is it?**
+Whichever state department deploys it owns the data — this is a self-hosted tool (Docker +
+Postgres), not a SaaS product that keeps data on our servers. Already built: password hashing,
+JWT login with role separation, no hardcoded secrets, CORS locked down, upload validation, rate
+limiting, and no internal errors ever shown to a user. Real retention/access policy would be
+defined together with the department, not decided by us alone.
 
-**Q14. What's your evidence it works — show test results.**
-96 automated backend tests, covering every rule check's PASS/FAIL/NEEDS_VERIFICATION
-branches, extraction unit tests, and a full 12-label end-to-end walkthrough. Separately —
-and this is the more honest evidence — this build cycle involved repeatedly re-scanning
-**real product photographs** (not the synthetic demo set), finding real extraction bugs from
-the actual OCR output, root-causing each one against the literal misread text, fixing it, and
-locking the fix in with a regression test. That process, and its visible trail of "found a
-real bug, fixed it, verified against the real image again," is itself part of the evidence —
-we're not claiming a polished, bug-free system; we're showing a system that gets real bugs
-found and fixed against real inputs, which is a different and more credible claim.
+**Q14. What's your actual evidence this works?**
+119 automated backend tests, covering every rule's PASS/FAIL/NEEDS VERIFICATION paths and a
+full 12-label end-to-end run. More honestly telling: this build cycle we repeatedly re-scanned
+**real product photos** (not the synthetic demo set), found real extraction bugs from the
+actual OCR output, traced each one to its root cause, fixed it, and locked the fix in with a
+test. That visible trail — find a real bug, fix it, verify against the real photo again — is
+itself part of the evidence. We're not claiming a polished, bug-free system; we're showing one
+that gets real bugs found and fixed against real inputs, which is a more credible claim.
 
-**Q15. Cost to deploy nationally?**
-No worked national cost model exists yet — building one responsibly needs real per-state
-volume assumptions we don't have. What we can state with confidence: the **marginal cost per
-scan is near-zero** (no LLM/Vision API billing — Tesseract and the rule engine are both free,
-open-source, self-hosted), so total cost scales primarily with **hosting infrastructure**
-(compute + storage + database), which is a materially smaller and more predictable line item
-than any per-transaction-billed alternative would carry at national volume.
+**Q15. What would this cost to run nationally?**
+No full national cost model yet — building one responsibly needs real per-state volume numbers
+we don't have. What we can say confidently: the cost per scan is near zero (no AI-API billing —
+Tesseract and the rule engine are both free and self-hosted), so total cost scales mainly with
+hosting (compute + storage + database) — a much smaller, more predictable number than any
+per-transaction-billed alternative at national scale.
 
-**Q16. How do you handle exempted categories?**
-Honestly, not yet automatically — this is a real, named gap (§1, §3), not hidden. Rule 26
-exemptions (packages ≤10g/10ml, restaurant-packed fast food, Drugs Price Control Order
-formulations, farm produce >50kg, pan masala's 2025 carve-out) are documented in our legal
-reference but not yet auto-applied against a scanned package's declared/estimated size. The
-fix is a bounded, known piece of work: an exemptions lookup keyed to declared net quantity and
-category, surfaced to the inspector for confirmation rather than silently auto-excluded (since
-misclassifying a genuinely non-exempt package as exempt would be the more dangerous failure
-mode) — not built yet, clearly scoped for the next iteration.
+**Q16. What about exempted categories (small packs, restaurant food, etc.)?**
+Honestly, not automatic yet — a real, named gap (§1, §3), not hidden. The exemptions (small
+packs under 10g/10ml, restaurant food, certain drug formulations, farm produce over 50kg, pan
+masala) are documented but not yet checked against a scanned package automatically. The fix:
+an exemptions lookup based on declared size and category, shown to the inspector to confirm
+rather than silently applied — since wrongly treating a non-exempt package as exempt would be
+the worse mistake. Clearly scoped, just not built yet.
 
-**Q17. Offline / poor-connectivity field use?**
-Not supported today — this is a web app requiring connectivity to the backend for OCR
-processing. The OCR/rule engine itself has **no external API dependency** (fully offline-
-capable in principle, since Tesseract runs locally), so a field-deployable offline mode is
-architecturally plausible as a future direction (e.g. a local-network or edge-device
-deployment) but is not something we've built or tested.
+**Q17. Does this work offline, in poor-connectivity areas?**
+Not today — it's a web app that needs a connection to the backend to process a scan. The
+OCR/rule engine itself has no external API dependency (Tesseract runs locally), so an offline
+or local-network version is architecturally possible later, just not something we've built or
+tested.
 
-**Q18. What happens to NEEDS_VERIFICATION items — who resolves them?**
-Today: the human Inspector, reading the evidence (extracted value, cropped OCR region,
-confidence, and the specific reason it wasn't auto-resolved) presented alongside every such
-finding in the report. There is no current workflow feature for *tracking* resolution (e.g. an
-inspector marking a NEEDS_VERIFICATION item as manually confirmed within the tool itself) —
-that's a real, sensible next feature for the repository, not yet built.
+**Q18. Who resolves a NEEDS VERIFICATION result?**
+Today: the human Inspector, using the evidence shown alongside it (the extracted text, the
+cropped photo region, confidence, and why it wasn't auto-resolved). There's no built-in way yet
+to mark one as "manually confirmed" inside the tool — a sensible next feature, not built yet.
 
-**Q19. Why should DoCA trust a report generated by an automated tool over a trained
-Inspector's own judgement?**
-It shouldn't have to choose — that's the wrong framing, and we say so directly. The tool
-doesn't ask to be trusted *instead of* the Inspector; every report is built to be trusted *as
-evidence for* the Inspector's own judgement, with full traceability (bounding boxes,
-confidence, clause citations) precisely so the Inspector — not the software — remains the
-one exercising judgement and making the determination.
+**Q19. Why should DoCA trust an automated report over a trained Inspector's own judgement?**
+It shouldn't have to pick one — that's the wrong question, and we say so directly. The tool
+isn't asking to be trusted instead of the Inspector; every report is built to be evidence *for*
+the Inspector's judgement, with full traceability (exact location, confidence, clause cited),
+specifically so the Inspector — not the software — is still the one making the call.
 
-**Q20. What's the single biggest technical risk in this project right now?**
-Honestly: **deployment reliability of the current free-tier hosting**, not the compliance
-logic itself. The rule engine, extraction pipeline, and legal grounding have all been
-stress-tested against real inputs this build cycle; the free-tier infrastructure choice made
-for a hackathon demo (cold starts, ephemeral storage) is the weaker link, and is explicitly
-not representative of what a real pilot deployment (§4) would run on.
+**Q20. What's the biggest risk in this project right now?**
+Honestly: the reliability of the current free-tier hosting, not the compliance logic itself.
+The rule engine and extraction pipeline have been stress-tested against real photos this build
+cycle; the free hosting used for the hackathon demo (cold starts, storage wiped on restart) is
+the weaker link, and clearly not what a real pilot would run on.
 
-**Q21. Why build this in Python/FastAPI rather than [X]?**
-FastAPI gives fast, well-typed API development with automatic OpenAPI documentation (useful
-both for our own testing and as judge/reviewer-facing technical documentation), and Python has
-the strongest, most mature OCR/image-processing ecosystem (OpenCV, pytesseract) available
-without a paid API — directly serving the offline-first, no-per-call-cost design goal in Q8.
+**Q21. Why Python/FastAPI instead of something else?**
+FastAPI gives fast, well-typed API development with automatic documentation, and Python has by
+far the most mature free OCR/image tooling (OpenCV, pytesseract) — directly serving the
+offline-first, no-per-call-cost goal from Q8.
 
-**Q22. What's the biggest thing you'd do differently if you started over?**
-We would define the real-world accuracy-measurement protocol (a labelled set of real, diverse
-field photographs, not synthetic mockups) *before* writing the rule engine, not after — this
-build cycle's most valuable work was finding and fixing real OCR bugs from real photos late in
-the process; doing that systematically from day one would have caught the same class of issues
-earlier and cheaper.
+**Q22. What would you do differently if you started over?**
+Define the real-world accuracy test — a labelled set of real, varied field photos, not
+synthetic mockups — *before* writing the rule engine, not after. The most valuable work this
+build cycle was finding and fixing real OCR bugs from real photos, late in the process; doing
+that systematically from day one would have caught the same issues earlier and cheaper.
 
-**Q23. Does this work for products that are already compliant — does it correctly say
-PASS?**
-Yes — the demo repository includes labels deliberately built to be fully compliant, and the
-rule engine correctly returns PASS across all applicable checks for them. A tool that only
-ever finds violations, never confirms compliance, would itself be a red flag; ours does both,
-visibly, in the same report format either way.
+**Q23. Does it correctly say PASS for a genuinely compliant product?**
+Yes — the demo set includes labels built to be fully compliant, and the rule engine correctly
+returns PASS across every applicable check for them. A tool that only ever finds problems and
+never confirms compliance would itself be a red flag; this one does both, visibly, in the same
+report either way.
 
-**Q24. How does the compliance_score number relate to the itemised PASS/FAIL list — which
-is authoritative?**
-The itemised list is authoritative, always. `compliance_score` (pass_count / applicable_count)
-is computed and shown only as a secondary summary metric, explicitly labelled as such in the
-UI and every report — never as a replacement for reading the actual itemised findings. This
-was a deliberate design decision specifically to prevent a single number from becoming a
-stand-in for the real evidence.
+**Q24. There's a compliance_score number — how does that relate to the PASS/FAIL list?**
+The itemised list is always the real answer. The score (pass count ÷ applicable checks) is
+shown only as a secondary summary, clearly labelled, never as a stand-in for actually reading
+the findings — a deliberate choice so a single number can't replace the real evidence.
 
-**Q25. Who is the "admin" role, in a real deployment — who would actually have dashboard
-access?**
-In our model: the supervising Controller/Deputy Controller tier, who would use the dashboard
-for the targeting/oversight use case in §3, versus the Inspector role, who performs scans in
-the field. This maps directly onto the real three-tier LM organisational structure (§1)
-rather than being an arbitrary two-role split.
+**Q25. In a real deployment, who would actually have dashboard (admin) access?**
+The supervising Controller/Deputy Controller tier, for the targeting use case in §3 — while
+Inspectors do the scanning in the field. That maps directly onto the real three-tier structure
+of Legal Metrology enforcement (§1), not an arbitrary split we invented.
 
 ---
 
-### 6. Pitch narrative + 60-second demo script
+### 6. The pitch, and a 60-second demo script
 
-**One-paragraph pitch narrative:**
+**One paragraph:**
 
-> Legal Metrology inspectors in India are responsible for checking mandatory declarations —
-> manufacturer identity, net quantity, MRP, dates, consumer care, country of origin, font
-> size, and placement — on every packaged commodity sold in the country, with a field
-> workforce that, by any reasonable reading of state recruitment and staffing patterns, is
-> orders of magnitude smaller than the SKU population it's meant to cover. The LMPC
-> Compliance Scanner turns that manual, page-by-page, eye-by-eye check into a photograph: an
-> Inspector uploads a picture of a package's principal display panel and gets back, in
-> seconds, an itemised report where every single finding — pass, fail, or "needs a human
-> look" — is cited to the exact clause of the Legal Metrology (Packaged Commodities) Rules,
-> 2011 it's checking, evidenced with the extracted text, its location on the label, and how
-> confident the OCR was. It reads English, Hindi, and Gujarati labels, because that's what
-> Indian shelves actually carry. It never asserts a confident wrong answer — where the
-> evidence is weak, it says so, explicitly, by design, because a compliance tool that
-> fabricates certainty is more dangerous than one that has none. And because it's built on
-> free, offline OCR and a transparent rule engine instead of a paid AI API, the entire
-> approach costs nothing per scan to run at any scale a state department needs.
+> Legal Metrology inspectors in India check mandatory declarations — manufacturer identity,
+> net quantity, MRP, dates, consumer care, country of origin, font size, and placement — on
+> every packaged product sold in the country, with a field workforce that's clearly far smaller
+> than the number of products it needs to cover. The LMPC Compliance Scanner turns that manual,
+> page-by-page check into a photograph: an Inspector uploads a picture of a package and gets
+> back, in seconds, an itemised report where every finding — pass, fail, or "needs a human
+> look" — is tied to the exact clause of the Legal Metrology (Packaged Commodities) Rules,
+> 2011, with the extracted text, where it was found, and how confident the OCR was. It reads
+> English, Hindi, and Gujarati, because that's what Indian shelves actually carry. It never
+> asserts a confident wrong answer — where the evidence is weak, it says so, because a
+> compliance tool that fakes certainty is more dangerous than one that admits doubt. And
+> because it runs on free, offline OCR instead of a paid AI API, it costs nothing per scan to
+> run at any scale a state department needs.
 
 **60-second demo script:**
 
-- **[0-10s]** "This is a real photograph of a real product — not a mockup." Upload it live.
-- **[10-20s]** While it processes: "Under the hood: OCR reads the label in whichever script
-  it's actually printed in, extracts every mandatory declaration, and checks it against 13
-  specific clauses of the Packaged Commodities Rules."
-- **[20-40s]** Report appears. Point at **one PASS** ("manufacturer address, found, Rule
-  6(1)(a) — here's the exact bounding box it came from") and **one FAIL or
-  NEEDS_VERIFICATION** ("MRP is present but missing the 'inclusive of all taxes' wording —
-  Rule 6(1)(e), FAIL" or "font size — this is a relative signal only, here's why, here's how
-  Tier 2 would make it a hard measurement").
-- **[40-50s]** Scroll to the annotated image: "Every finding is drawn directly on the photo,
+- **[0-10s]** "This is a real photo of a real product — not a mockup." Upload it live.
+- **[10-20s]** While it processes: "It reads the label in whatever script it's actually printed
+  in, pulls out every mandatory declaration, and checks it against specific clauses of the
+  Rules."
+- **[20-40s]** Report appears. Point at one PASS ("manufacturer address, found, here's the exact
+  spot it came from") and one FAIL or NEEDS VERIFICATION ("MRP is there, but missing the
+  'inclusive of all taxes' wording — FAIL" or "font size — this is a relative signal only,
+  here's why, and here's how a real measurement would make it a hard check").
+- **[40-50s]** Scroll to the annotated photo: "Every finding is marked directly on the image,
   not just listed in a table."
-- **[50-60s]** Close on the dashboard: "And every scan an inspector does becomes part of a
-  permanent, searchable record — which is the part manual inspection has never had."
+- **[50-60s]** Close on the dashboard: "And every scan becomes part of a permanent, searchable
+  record — which manual inspection has never had."
 
 ---
 
-## A note on how this document was produced
+## A note on how this document was written
 
-Web-sourced factual claims in this document (Section 36 penalty figures, the three-tier LM
-organisational structure, NCH/e-Daakhil/e-Jagriti mechanics, Rule 26 exemption thresholds, the
-2017/2020 e-commerce liability framework) were checked against live web search this session
-and are cited inline. We searched specifically and could not find a single authoritative
-national inspector-count or national SKU-count figure — rather than inventing one to make a
-tidier slide, this document says so and reasons from the closest available proxies instead,
-labelled as estimates throughout. That is a deliberate consistency with this project's own
-"never fabricate a legal verdict" principle, extended here to "never fabricate a market
-number" either.
+Every factual claim here that came from outside our own codebase (penalty amounts, the
+three-tier enforcement structure, the consumer-helpline process, exemption thresholds, the
+e-commerce rules) was checked against a live web search and is cited inline above. We looked
+specifically for a national inspector count and a national product count, found neither
+published anywhere, and said so instead of inventing a number to make a slide look tidier —
+the same "don't fabricate" rule this whole project runs on, just applied to market numbers too.
