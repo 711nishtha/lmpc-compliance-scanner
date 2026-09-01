@@ -168,12 +168,24 @@ def check_net_quantity_clear_space(d: Declarations) -> RuleResult:
     buffer_y0 = box.y - h
     buffer_y1 = box.y + box.height + h
 
-    def _is_same_region(r: RegionBox) -> bool:
-        return r.x == box.x and r.y == box.y and r.width == box.width and r.height == box.height
+    def _is_part_of_the_declaration(r: RegionBox) -> bool:
+        """The net-quantity declaration cannot encroach on its own clear space. Containment, not
+        an exact geometry match: the declaration's box is not always one OCR region. On real
+        packs the value is printed in a column opposite its label and OCR returns the number and
+        its unit as separate regions ("57" and "g"), so the field's box is their union and an
+        exact-match test recognises neither -- the check then reported the declaration's own
+        digits and unit as text intruding on it, a self-inflicted FAIL. Anything falling wholly
+        inside the declaration's own box is part of that declaration by construction."""
+        return (
+            r.x >= box.x
+            and r.y >= box.y
+            and r.x + r.width <= box.x + box.width
+            and r.y + r.height <= box.y + box.height
+        )
 
     intruders = []
     for r in d.all_regions:
-        if _is_same_region(r):
+        if _is_part_of_the_declaration(r):
             continue
         overlaps = not (
             r.x + r.width <= buffer_x0 or r.x >= buffer_x1

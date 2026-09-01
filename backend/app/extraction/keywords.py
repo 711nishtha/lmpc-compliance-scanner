@@ -25,7 +25,13 @@ NET_QTY_ANCHORS = {
 }
 
 MFG_DATE_ANCHORS = {
-    "eng": ["mfd", "mfg date", "mfg.date", "manufactured on", "packed on", "pkd on", "mfg", "packing date"],
+    # "pkd" bare, not just "pkd on": real Indian packs overwhelmingly print the packing date as a
+    # two-column row -- the label cell reads exactly "PKD." with the date in a separate value
+    # column opposite (confirmed on a real DFM/Kurkure pack photo, where "pkd on" matched nothing
+    # and a plainly printed packing date extracted as "not found"). Same 3-letter shape as the
+    # "mfd"/"mfg" entries already here, and Rule 6(1)(d) treats the pre-packing date as
+    # satisfying the declaration, so this anchors the right field.
+    "eng": ["mfd", "mfg date", "mfg.date", "manufactured on", "packed on", "pkd on", "pkd", "mfg", "packing date"],
     "hin": ["निर्माण तिथि", "पैकिंग तिथि"],
     "guj": ["ઉત્પાદન તારીખ", "પેકિંગ તારીખ"],
 }

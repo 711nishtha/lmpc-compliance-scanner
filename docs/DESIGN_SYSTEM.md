@@ -85,17 +85,46 @@ table.
 Mono on rule IDs and extracted values is functional, not decorative — it makes `R6-1` vs `R8-1`
 scannable in a dense table.
 
-## 5. Rules for contributors
+## 5. The app shell — "the instrument"
+
+The authenticated app (rail + workspace) is built from the vocabulary of real measuring tools,
+because that is the domain's own language: Legal *Metrology* is the science of measurement. This
+replaced an earlier layout that put every screen in one white card on cream, which read as a
+different product from the dark, cinematic landing page it sits behind.
+
+| Motif | Where | What it is |
+|---|---|---|
+| **Rule ticks** | rail edge, page headers, readout feet | hairline calibration scales (`--tick-minor` / `--tick-major`) at real steel-rule proportions — minor every 8px, major every 40px |
+| **Reticle** | evidence image, capture bay | `.bracket` corner marks framing what the inspector is meant to look *at* |
+| **Readout** | dashboard, verdict panel | figures in the display serif over a sunken well with a mono unit label — a gauge face |
+| **Engraved plate** | every micro-label | mono, uppercase, letterspaced |
+
+Files: `instrument.css` (shell, rail, panels, readouts, ledger), `auth.css` (the split sign-in
+composition), `bits.css` (chips, distribution bar, table chrome), `pages.css` (scan bay, findings),
+`ui/Bits.jsx` (shared `StatusChip`, `ScoreCell`, `PageHead`, `Empty`, `formatWhen`).
+
+Dark is the design's home key; light is the same instrument in a paper-and-brass register, not an
+inversion. Both are token-driven, so neither can drift independently.
+
+**Status vocabulary lives in exactly one place** — `ui/Bits.jsx`'s `StatusChip`. §2's dichromacy
+finding means colour is a *redundant* channel, so every chip ships its glyph and its text label
+as well as its hue. Centralising it is what stops a future screen from rendering a bare coloured
+dot and quietly breaking WCAG 1.4.1 for the whole product.
+
+## 6. Rules for contributors
 
 - Never write a raw hex in a component. Add a token.
 - Never use teal for text or for a white-text button.
 - Never let color be the only signal for a status.
 - Body text minimum 16px (`--text-base`); mono labels may go to 12px (`--text-xs`).
-- Interactive targets ≥44px tall.
+- Interactive targets ≥44px tall. One documented exception: `.btn-small` (32px) is used only for
+  secondary actions inside dense desktop review tables — notably the per-finding "Mark verified"
+  control, where making an irreversible override the largest target in a crowded row invites
+  mis-taps. Primary actions keep the full target on every screen size.
 - Motion 150–300ms, and `prefers-reduced-motion` collapses all durations to 1ms (already wired in
   `tokens.css`).
 
-## 6. Verification
+## 7. Verification
 
 Contrast and dichromat figures above were produced by a real script, not estimated by eye —
 see the working scripts under the session scratchpad (`contrast.py`, `contrast2.py`,

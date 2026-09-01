@@ -48,3 +48,64 @@ def test_no_evidence_box_is_skipped_without_error():
     image = np.full((50, 50, 3), 255, dtype=np.uint8)
     annotated = draw_annotations(image, report)
     assert annotated.shape == image.shape
+
+
+def test_needs_verification_boxes_are_not_drawn():
+    """A NEEDS_VERIFICATION result is the engine saying it could not reach a finding. Drawing a
+    rectangle for it asserts a precision that does not exist -- the box is whatever OCR line the
+    evidence came from, not a measured region -- and it reads on the image as a confident machine
+    finding. Such a rule belongs in the itemised table where its reason is stated."""
+    import numpy as np
+
+    from app.reports.annotate import draw_annotations
+    from app.rules.schema import BoundingBox, ComplianceReport, Evidence, RuleResult, Status
+
+    image = np.full((200, 200, 3), 255, dtype=np.uint8)
+    report = ComplianceReport(results=[
+        RuleResult(
+            rule_id="R7-1", rule_reference="Rule 7(2)", requirement_text="x",
+            status=Status.NEEDS_VERIFICATION,
+            evidence=Evidence(bounding_box=BoundingBox(x=10, y=10, width=100, height=40)),
+        )
+    ])
+    annotated = draw_annotations(image, report)
+    assert np.array_equal(annotated, image), "no box should be drawn for NEEDS_VERIFICATION"
+
+
+def test_a_box_shared_with_a_real_finding_is_still_drawn():
+    """Only boxes cited exclusively by undrawn statuses disappear. A region a FAIL points at is a
+    real finding and must survive a NEEDS_VERIFICATION rule citing the same region."""
+    import numpy as np
+
+    from app.reports.annotate import draw_annotations
+    from app.rules.schema import BoundingBox, ComplianceReport, Evidence, RuleResult, Status
+
+    image = np.full((200, 200, 3), 255, dtype=np.uint8)
+    box = BoundingBox(x=10, y=60, width=100, height=40)
+    report = ComplianceReport(results=[
+        RuleResult(rule_id="R7-1", rule_reference="r", requirement_text="x",
+                   status=Status.NEEDS_VERIFICATION, evidence=Evidence(bounding_box=box)),
+        RuleResult(rule_id="R6-4", rule_reference="r", requirement_text="x",
+                   status=Status.FAIL, evidence=Evidence(bounding_box=box)),
+    ])
+    annotated = draw_annotations(image, report)
+    assert not np.array_equal(annotated, image)
+
+
+def test_a_manually_verified_rule_gets_its_box_back():
+    """Verification turns NEEDS_VERIFICATION into PASS, so the region stops being undrawn -- the
+    annotated image has to be regenerated for that to show, which api/scans.py does on verify."""
+    import numpy as np
+
+    from app.reports.annotate import draw_annotations
+    from app.rules.schema import BoundingBox, ComplianceReport, Evidence, RuleResult, Status
+
+    image = np.full((200, 200, 3), 255, dtype=np.uint8)
+    report = ComplianceReport(results=[
+        RuleResult(
+            rule_id="R7-1", rule_reference="r", requirement_text="x", status=Status.PASS,
+            original_status=Status.NEEDS_VERIFICATION, verified_by="admin@example.com",
+            evidence=Evidence(bounding_box=BoundingBox(x=10, y=10, width=100, height=40)),
+        )
+    ])
+    assert not np.array_equal(draw_annotations(image, report), image)

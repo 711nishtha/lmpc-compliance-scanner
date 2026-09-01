@@ -32,6 +32,23 @@ from app.config import (
 
 MIN_TEXT_HEIGHT_PX_FOR_UPSCALE = 25
 
+# Skew-estimation consensus gate -- see _estimate_skew_angle for the real bug these prevent and
+# the measurements behind the numbers. All three are deliberately generous: every value sits far
+# from both sides of the measured gap rather than being tuned to just barely separate it.
+#
+# MIN_SKEW_LINES -- below this, the agreement fraction is computed from too few samples to mean
+# anything (2 lines trivially "agree"). Demo label 08 detects only 2 lines and is upright, so it
+# takes this path and is left alone, exactly as before.
+MIN_SKEW_LINES = 8
+# How close to the median an angle must be to count as agreeing with it. 1 degree is far wider
+# than the spread of a genuine skew (measured MAD <= 0.12 deg across rotations from 3 to 30 deg)
+# and far narrower than a real photo's edge scatter (measured MAD 13.06 deg).
+SKEW_AGREEMENT_TOLERANCE_DEG = 1.0
+# Fraction of detected lines that must agree before the median is trusted enough to rotate by.
+# Measured: 0.87-1.00 for genuine skew, 0.78-1.00 for the upright demo labels, 0.07 for the real
+# photo this fixes. 0.6 has wide margin on both sides of that gap.
+MIN_SKEW_AGREEMENT_FRACTION = 0.6
+
 
 @dataclass
 class ImageQualityFloorResult:
@@ -114,6 +131,33 @@ def cap_dimension(image: np.ndarray, max_dim: int = MAX_PROCESSING_DIMENSION) ->
 
 
 def _estimate_skew_angle(gray: np.ndarray) -> float:
+    """Estimates page skew from the angles of straight edges, but only TRUSTS the estimate when
+    those edges actually agree with each other. Returns 0.0 (do not rotate) when they don't.
+
+    The consensus gate is the whole point, and it fixes a real, severe bug found by scanning an
+    actual product photo (a DFM/Kurkure packet on a table) rather than a demo mockup. This
+    function used to return the plain median of every Hough line angle in (-45, 45). On a real
+    photo the strong straight edges are NOT text baselines -- they are the packet's own diagonal
+    edges, foil creases, the nutrition-table borders, the vertical seam, and the background. On
+    that photo it returned -29.91 deg and preprocess() duly rotated an already-upright label by
+    30 degrees, destroying it: OCR dropped from 72 regions to 9, and the scan reported FAIL --
+    "not found" -- for manufacturer, net quantity, MRP, mfg date, and consumer care, every one of
+    which is plainly printed on the pack. False FAILs are the worst possible error direction for
+    an enforcement tool, and this produced five of them from one bad rotation.
+    
+    What separates the two cases is not the angle's SIZE but its SPREAD, and the separation is
+    ~100x, not marginal (measured):
+    
+        real photo (upright, must not rotate)   212 lines, MAD 13.06 deg, 7% agree within 1 deg
+        genuinely skewed label, +3 to +30 deg   26-36 lines, MAD <=0.12 deg, 87-100% agree
+        all 12 demo labels (upright)            2-40 lines, MAD 0.00 deg, 78-100% agree
+    
+    So the gate is on agreement, deliberately NOT on a maximum angle: the old estimator recovers
+    a genuine 30 deg rotation accurately (measured -29.98 for a +30 deg rotation), and capping
+    the angle would throw that away to fix a problem the angle's size never actually indicated.
+    A photo whose edges disagree this violently carries no usable skew signal at all, and the
+    safe action there is to leave the image alone -- Tesseract itself tolerates a few degrees of
+    residual skew far better than it tolerates a 30 degree one this function invented."""
     edges = cv2.Canny(gray, 50, 150, apertureSize=3)
     lines = cv2.HoughLinesP(edges, 1, np.pi / 180, 100, minLineLength=100, maxLineGap=10)
     if lines is None:
@@ -126,9 +170,16 @@ def _estimate_skew_angle(gray: np.ndarray) -> float:
         angle = np.degrees(np.arctan2(y2 - y1, x2 - x1))
         if -45 < angle < 45:
             angles.append(angle)
-    if not angles:
+    if len(angles) < MIN_SKEW_LINES:
+        # Too little evidence for the agreement test below to mean anything. Not rotating is the
+        # conservative action: a missed 2 deg skew costs far less than an invented 30 deg one.
         return 0.0
-    return float(np.median(angles))
+    angle_array = np.asarray(angles)
+    median = float(np.median(angle_array))
+    agreement = float(np.mean(np.abs(angle_array - median) <= SKEW_AGREEMENT_TOLERANCE_DEG))
+    if agreement < MIN_SKEW_AGREEMENT_FRACTION:
+        return 0.0
+    return median
 
 
 def deskew(image: np.ndarray) -> tuple[np.ndarray, float]:

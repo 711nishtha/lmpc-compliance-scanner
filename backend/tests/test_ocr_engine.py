@@ -7,6 +7,7 @@ real Gujarati extraction on demo_data -- see that comment before reaching for a 
 threshold as a fix here again.
 """
 import sys
+import time
 from pathlib import Path
 from unittest.mock import patch
 
@@ -94,3 +95,46 @@ def test_regions_at_or_above_the_char_floor_still_get_refined():
          patch("app.ocr.engine._crop_region", return_value=None):
         _refine_regions_by_script(None, [long_region], ("eng", "hin", "guj"))
     mock_crop.assert_called()
+
+
+# ---------- _refine_regions_by_script: concurrency must not change the output ----------
+
+def test_refined_regions_keep_input_order_under_concurrency():
+    """Refinement runs the crops through a thread pool (see OCR_REFINE_WORKERS -- it is the
+    single biggest speed lever in engine.py). Downstream extraction walks regions in reading
+    order to associate an anchor keyword with the value that follows it, so the pool must return
+    results in ARGUMENT order, not completion order. This makes completion order deliberately
+    the REVERSE of argument order -- the first region submitted finishes last -- so an
+    as_completed-style implementation would visibly scramble the list and fail here."""
+    regions = [_region(f"REGION {i:02d} VALUE", y=i * 30) for i in range(12)]
+    delays = {r.text: (len(regions) - i) * 0.01 for i, r in enumerate(regions)}
+
+    def slow_crop(crop, lang):
+        text = crop  # _crop_region is patched below to pass the region text straight through
+        time.sleep(delays[text])
+        return f"{text} refined", 88.0
+
+    with patch("app.ocr.engine._ocr_crop", side_effect=slow_crop), \
+         patch("app.ocr.engine._crop_region", side_effect=lambda img, r, pad=15: r.text):
+        refined = _refine_regions_by_script(None, regions, ("eng", "hin", "guj"))
+
+    assert [r.text for r in refined] == [f"{r.text} refined" for r in regions]
+    assert [r.y for r in refined] == [r.y for r in regions]
+
+
+def test_concurrent_refinement_matches_sequential_refinement_exactly():
+    """The pool is a pure timing change: same inputs, same outputs. Runs the identical region
+    list through the concurrent path and through the single-worker sequential path (which
+    OCR_REFINE_WORKERS=1 selects) and requires every field of every region to match."""
+    regions = [_region(f"LINE {i} SOME TEXT", y=i * 30) for i in range(8)]
+
+    def fake_crop(crop, lang):
+        return f"{crop}|{lang}", 77.0
+
+    def run(workers):
+        with patch("app.ocr.engine.OCR_REFINE_WORKERS", workers), \
+             patch("app.ocr.engine._ocr_crop", side_effect=fake_crop), \
+             patch("app.ocr.engine._crop_region", side_effect=lambda img, r, pad=15: r.text):
+            return _refine_regions_by_script(None, regions, ("eng", "hin", "guj"))
+
+    assert run(4) == run(1)

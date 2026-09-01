@@ -209,3 +209,87 @@ def test_missing_label_all_fields_absent_and_engine_fails():
     assert report.overall_status == Status.FAIL
     mrp_result = next(r for r in report.results if r.rule_id == "R6-7")
     assert mrp_result.status == Status.FAIL
+
+
+# ---------- two-column "label ... value" rows (see fields.py _row_companions) ----------
+#
+# Regression guards for a real scan of a real product (a DFM/Kurkure packet photographed on a
+# table, not a demo mockup). Indian packs print the mandatory declarations as a two-column block
+# -- NET QTY. / BATCH NO. / PKD. / USE BY. / MRP down the left, values right-aligned opposite --
+# and OCR reads label and value as separate regions. Every geometry below is the ACTUAL measured
+# geometry from that scan, not invented numbers. Before this, the scan reported FAIL/"not found"
+# for net quantity, MRP and mfg date, all three plainly printed on the pack.
+
+
+def test_net_quantity_reads_across_a_two_column_label_value_row():
+    """Measured geometry: "NET QTY." ends at x=1408, "57" starts at x=1729 (a 321px gutter), and
+    the unit "g" is a THIRD separate region at x=1843. The value also sits 25px higher than the
+    label that names it. All three must resolve to one declaration."""
+    regions = [
+        region("INET QTY,", x=1143, y=2472, w=265, h=80, conf=84.5),
+        region("57", x=1729, y=2447, w=86, h=64, conf=93.0),
+        region("g", x=1843, y=2461, w=37, h=65, conf=92.0),
+    ]
+    d = extract_declarations(regions)
+    assert d.net_quantity_value.value == "57"
+    assert d.net_quantity_unit.value == "g"
+    assert d.commodity_category == "solid"
+
+
+def test_stacked_label_value_rows_do_not_steal_each_others_values():
+    """The failure mode that made "nearest companion first" necessary rather than just
+    concatenating the row. This pack's value column is offset upward by about half a row, so the
+    USE BY date (centre y=2785) falls inside the vertical band of the PKD label ABOVE it
+    (span 2709-2777) as well as its own. Taking the first regex hit on PKD's whole row reported
+    the use-by date as the manufacturing date -- a WRONG value, which is worse than a missing
+    one. Each label must take the date nearest to it."""
+    regions = [
+        region("PKD.", x=1141, y=2709, w=113, h=68, conf=63.0),
+        region("7/06/26", x=1747, y=2697, w=172, h=41, conf=60.0),
+        region("USE By", x=1140, y=2804, w=209, h=87, conf=78.0),
+        region("14/03/27", x=1715, y=2760, w=239, h=50, conf=96.0),
+    ]
+    d = extract_declarations(regions)
+    assert d.mfg_month_year.value == "7/06/26", "PKD must take the date nearest it"
+    assert d.best_before_use_by.value == "14/03/27", "USE BY must keep its own date"
+
+
+def test_row_association_does_not_leap_a_wide_blank_gutter():
+    """The row walk chains its gap from region to region, so a row grows through printed content
+    but stops at a wide blank -- this is what stops a label reaching across a package fold into
+    an unrelated panel. The gap here is far past the limit and there is nothing in between."""
+    regions = [
+        region("NET QTY.", x=100, y=1000, w=265, h=80),
+        region("999 kg", x=3000, y=1000, w=200, h=64),  # different panel entirely
+    ]
+    d = extract_declarations(regions)
+    assert not d.net_quantity_value.found
+
+
+def test_anchor_survives_one_stray_ocr_letter_welded_onto_it():
+    """Real OCR output from that pack: "NET QTY." came back as "INET QTY," -- a stray "I" from
+    the printed rule beside it. The exact letter-boundary guard rejects that by design, and so
+    does the fuzzy path (it applies the same guard to its window edges)."""
+    d = extract_declarations([region("INET QTY, 57 g", w=400, h=80)])
+    assert d.net_quantity_value.value == "57"
+
+
+def test_stray_letter_tolerance_does_not_reopen_the_teenagers_collision():
+    """The short-anchor collision the letter-boundary guard exists for must stay closed: "rs" is
+    below the length floor for this tolerance, and is preceded by a seven-letter run here anyway."""
+    d = extract_declarations([region("16+17 year old teenagers (ICMR, 2020)")])
+    assert not d.mrp_value.found
+
+
+def test_pkd_alone_anchors_the_manufacturing_date():
+    """Real packs label the packing date with a bare "PKD.", not "packed on"/"pkd on"."""
+    d = extract_declarations([region("PKD. 17/06/26", w=400, h=60)])
+    assert d.mfg_month_year.found
+
+
+def test_full_day_month_year_date_keeps_its_year():
+    """DATE_RE alternatives are ordered most-specific-first: Python's `|` is first-match, so the
+    short form leading meant a real "14/03/27" extracted as "14/03", silently dropping the year
+    and reading as a month/year when it is really a day/month."""
+    d = extract_declarations([region("USE BY. 14/03/27", w=400, h=60)])
+    assert d.best_before_use_by.value == "14/03/27"

@@ -51,3 +51,33 @@ class Scan(Base):
     created_at: Mapped[dt.datetime] = mapped_column(DateTime, default=dt.datetime.utcnow, index=True)
 
     product: Mapped["Product | None"] = relationship(back_populates="scans")
+
+
+class RuleVerification(Base):
+    """Append-only audit trail of human overrides of a NEEDS_VERIFICATION rule result.
+
+    The upgraded status is also materialised into Scan.rule_results_json so reads stay a single
+    query, but THIS table is the record. A materialised status can be recomputed, overwritten by
+    a later rescan, or edited; an inspection finding that a named official signed off on needs a
+    row that is only ever inserted. Rows are never updated or deleted -- if a rule is verified
+    again, that is another row, and the history stays legible.
+
+    No unique constraint on (scan_id, rule_id) for the same reason: the constraint belongs in the
+    endpoint, which refuses to verify anything that is not currently NEEDS_VERIFICATION, not in
+    the audit log, whose job is to record what happened rather than to prevent it.
+    """
+
+    __tablename__ = "rule_verifications"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    scan_id: Mapped[int] = mapped_column(ForeignKey("scans.id"), index=True)
+    rule_id: Mapped[str] = mapped_column(String(32), index=True)
+    # What the engine said before the override -- stored here as well as on the result JSON so the
+    # audit row is self-contained and stays meaningful even if the scan is later re-run.
+    original_status: Mapped[str] = mapped_column(String(32))
+    new_status: Mapped[str] = mapped_column(String(32))
+    verified_by: Mapped[str] = mapped_column(String(255), index=True)
+    note: Mapped[str | None] = mapped_column(Text, nullable=True)
+    created_at: Mapped[dt.datetime] = mapped_column(
+        DateTime, default=lambda: dt.datetime.now(dt.timezone.utc), index=True
+    )

@@ -12,6 +12,10 @@ pytesseract==0.3.13
 reportlab==5.0.1
 python-docx==1.2.0
 python-multipart==0.0.32
+# Used by app/vision/gemini.py for the Gemini REST call. Already present transitively (Starlette's
+# TestClient depends on it); pinned explicitly here because it is now a DIRECT runtime dependency
+# of a request path, and an indirect dep can be dropped by an upstream release without warning.
+httpx==0.28.1
 bcrypt==5.0.0
 pyjwt==2.13.0
 

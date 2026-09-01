@@ -5,6 +5,10 @@
 
 @import url('https://fonts.googleapis.com/css2?family=Libre+Baskerville:ital,wght@0,400;0,700;1,400&family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap');
 @import './tokens.css';
+@import './instrument.css';
+@import './auth.css';
+@import './bits.css';
+@import './pages.css';
 
 *, *::before, *::after { box-sizing: border-box; }
 
@@ -403,3 +407,58 @@ button:disabled { opacity: 0.55; cursor: not-allowed; }
   color: var(--color-nav-fg);
 }
 .nav .theme-toggle:hover { background: color-mix(in srgb, var(--color-nav-fg) 12%, transparent); }
+
+/* ---- Admin manual verification of a NEEDS_VERIFICATION result ------------------------------
+   See app/api/scans.py::verify_rule_result. Styled as a quiet, secondary action deliberately:
+   overriding a machine finding should read as a considered step, not the obvious thing to click
+   on every indeterminate row. */
+.btn-small {
+  margin-top: var(--space-2);
+  padding: var(--space-2) var(--space-3);
+  font-size: var(--text-sm);
+  /* Below the 44px touch target the primary actions use. Acceptable here specifically: this
+     control only ever appears for an admin on a desktop review screen, and making an
+     irreversible override the largest target in a dense table invites mis-taps. */
+  min-height: 32px;
+}
+
+.btn-secondary {
+  background: var(--color-surface);
+  color: var(--color-text);
+  border: 1px solid var(--color-border-strong);
+}
+.btn-secondary:hover:not(:disabled) { background: var(--color-surface-alt); }
+.btn-secondary:active:not(:disabled) { background: var(--color-surface-sunk); }
+
+.verify-block {
+  margin-top: var(--space-3);
+  padding-top: var(--space-2);
+  border-top: 1px dashed var(--color-border);
+}
+
+.verify-note {
+  width: 100%;
+  margin-top: var(--space-2);
+  padding: var(--space-2);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  background: var(--color-surface);
+  color: var(--color-text);
+  font-family: var(--font-body);
+  font-size: var(--text-sm);
+  resize: vertical;
+}
+
+.verify-actions {
+  display: flex;
+  gap: var(--space-2);
+  flex-wrap: wrap;
+}
+
+/* Provenance under an upgraded badge. Uses the NEEDS_VERIFICATION colour, not the PASS colour:
+   the row now reads PASS, and this line exists precisely to say a person put it there. */
+.verified-tag {
+  margin-top: var(--space-2);
+  color: var(--color-status-verify);
+  line-height: 1.35;
+}

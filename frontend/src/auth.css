@@ -1,0 +1,314 @@
+/* ==========================================================================
+   AUTH — a full-viewport split composition, not a card on a page
+   ==========================================================================
+   Left is the instrument demonstrating itself (real declarations, real rule
+   citations, sweeping under a scan line); right is the form on a calm plate.
+   The split collapses to the form alone on small screens -- the stage is
+   atmosphere, and atmosphere is the first thing to cut when space is scarce.
+   ========================================================================== */
+
+.auth {
+  display: grid;
+  grid-template-columns: 1.05fr 0.95fr;
+  min-height: 100vh;
+  background: var(--color-bg);
+}
+
+.auth-toggle { position: fixed; top: var(--space-4); right: var(--space-5); z-index: 5; }
+
+/* ---- Left stage --------------------------------------------------------- */
+
+.auth-stage {
+  position: relative;
+  overflow: hidden;
+  display: flex;
+  align-items: center;
+  padding: var(--space-7) clamp(var(--space-6), 5vw, 72px);
+  color: var(--hero-foreground);
+  background:
+    radial-gradient(820px 620px at 18% 8%, color-mix(in oklab, var(--color-accent) 26%, transparent), transparent 68%),
+    radial-gradient(680px 520px at 88% 92%, color-mix(in oklab, var(--color-brand-brown) 34%, transparent), transparent 70%),
+    var(--hero-bg);
+}
+
+/* A faint measured grid: graph paper under the instrument. */
+.auth-stage-grid {
+  position: absolute;
+  inset: 0;
+  opacity: 0.5;
+  background-image:
+    repeating-linear-gradient(to right, color-mix(in oklab, var(--hero-foreground) 7%, transparent) 0 1px, transparent 1px 48px),
+    repeating-linear-gradient(to bottom, color-mix(in oklab, var(--hero-foreground) 7%, transparent) 0 1px, transparent 1px 48px);
+  -webkit-mask-image: radial-gradient(closest-side at 40% 40%, #000 30%, transparent 100%);
+  mask-image: radial-gradient(closest-side at 40% 40%, #000 30%, transparent 100%);
+}
+
+.auth-stage-inner { position: relative; max-width: 520px; }
+
+.auth-mark { display: flex; align-items: center; gap: var(--space-3); margin-bottom: var(--space-7); }
+
+.auth-mark-box {
+  position: relative;
+  width: 26px; height: 26px; flex: none;
+  border: 1px solid color-mix(in oklab, var(--color-brand-teal) 80%, transparent);
+  border-radius: 3px;
+  background: color-mix(in oklab, var(--color-brand-teal) 18%, transparent);
+}
+.auth-mark-box::before, .auth-mark-box::after {
+  content: '';
+  position: absolute;
+  background: var(--color-brand-teal);
+  top: 50%; left: 50%;
+  transform: translate(-50%, -50%);
+}
+.auth-mark-box::before { width: 12px; height: 1px; }
+.auth-mark-box::after  { width: 1px; height: 12px; }
+
+.auth-mark span {
+  font-family: var(--font-display);
+  font-size: 0.98rem;
+  letter-spacing: 0.02em;
+  line-height: 1.1;
+}
+.auth-mark em {
+  display: block;
+  font-family: var(--font-mono);
+  font-style: normal;
+  font-size: 0.56rem;
+  letter-spacing: 0.2em;
+  text-transform: uppercase;
+  color: var(--hero-muted);
+  margin-top: 4px;
+}
+
+.auth-stage-lead {
+  font-family: var(--font-display);
+  font-size: clamp(1.5rem, 2.6vw, 2.2rem);
+  line-height: 1.24;
+  letter-spacing: -0.02em;
+  margin: 0 0 var(--space-6);
+}
+
+/* ---- Specimen readout ---------------------------------------------------- */
+
+.auth-specimen {
+  position: relative;
+  overflow: hidden;
+  border: 1px solid color-mix(in oklab, var(--hero-foreground) 16%, transparent);
+  border-radius: var(--radius-md);
+  background: color-mix(in oklab, #000 26%, transparent);
+  backdrop-filter: blur(2px);
+  padding: var(--space-2) 0;
+}
+
+/* The scan line. Slow, single-direction, low-opacity -- the one animated
+   element on the screen, so it reads as an instrument working rather than as
+   decoration competing for attention. */
+.auth-specimen-scan {
+  position: absolute;
+  left: 0; right: 0; top: 0;
+  height: 90px;
+  background: linear-gradient(
+    180deg,
+    transparent,
+    color-mix(in oklab, var(--color-brand-teal) 22%, transparent),
+    transparent
+  );
+  animation: auth-sweep 5.5s var(--ease-expo) infinite;
+  pointer-events: none;
+}
+
+@keyframes auth-sweep {
+  0%   { transform: translateY(-100px); opacity: 0; }
+  12%  { opacity: 1; }
+  88%  { opacity: 1; }
+  100% { transform: translateY(320px); opacity: 0; }
+}
+
+.auth-specimen-list { list-style: none; margin: 0; padding: 0; }
+
+.auth-specimen-list li {
+  display: grid;
+  grid-template-columns: 92px 1fr auto;
+  align-items: baseline;
+  gap: var(--space-3);
+  padding: 10px var(--space-4);
+  border-bottom: 1px solid color-mix(in oklab, var(--hero-foreground) 8%, transparent);
+  opacity: 0.42;
+  transition: opacity var(--dur-slow) var(--ease-out), background var(--dur-slow) var(--ease-out);
+}
+.auth-specimen-list li:last-child { border-bottom: none; }
+.auth-specimen-list li.is-live {
+  opacity: 1;
+  background: color-mix(in oklab, var(--color-brand-teal) 9%, transparent);
+}
+
+.sp-field {
+  font-family: var(--font-mono);
+  font-size: 0.6rem;
+  letter-spacing: 0.16em;
+  color: var(--hero-muted);
+}
+.sp-value { font-family: var(--font-display); font-size: 0.98rem; }
+.sp-rule {
+  font-family: var(--font-mono);
+  font-size: 0.58rem;
+  letter-spacing: 0.08em;
+  color: color-mix(in oklab, var(--color-brand-teal) 90%, white);
+}
+
+.auth-stage-foot {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  margin-top: var(--space-6);
+  font-family: var(--font-mono);
+  font-size: 0.58rem;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  color: var(--hero-muted);
+}
+.auth-stage-foot .dot {
+  width: 3px; height: 3px;
+  border-radius: 50%;
+  background: currentColor;
+  opacity: 0.6;
+}
+
+/* ---- Right form panel ---------------------------------------------------- */
+
+/* The form side is a lit plate against the stage, not just a lighter rectangle:
+   a hairline seam plus a soft top-light stops the two halves from reading as one
+   flat surface in dark mode, where surface and stage sit close in luminance. */
+.auth-panel {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: var(--space-7) clamp(var(--space-5), 4vw, 64px);
+  background:
+    radial-gradient(120% 60% at 50% 0%, color-mix(in oklab, var(--color-accent) 8%, transparent), transparent 60%),
+    var(--color-surface);
+  border-left: 1px solid var(--color-border-strong);
+  box-shadow: inset 1px 0 0 color-mix(in oklab, var(--color-accent) 22%, transparent);
+}
+
+/* The calibration rule again, tying the sign-in screen to every page behind it. */
+.auth-panel::after {
+  content: '';
+  position: absolute;
+  left: 0; right: 0; bottom: 0;
+  height: 8px;
+  background-image: var(--tick-major), var(--tick-minor);
+  background-size: 100% 8px, 100% 4px;
+  background-repeat: repeat-x;
+  background-position: bottom left;
+  opacity: 0.7;
+}
+
+.auth-panel-foot {
+  position: absolute;
+  left: 0; right: 0; bottom: var(--space-5);
+  display: flex;
+  justify-content: center;
+  gap: var(--space-3);
+  font-family: var(--font-mono);
+  font-size: 0.56rem;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: var(--color-text-muted);
+  opacity: 0.8;
+}
+
+.auth-form-wrap { width: 100%; max-width: 380px; }
+
+.auth-title {
+  font-family: var(--font-display);
+  font-size: clamp(1.7rem, 2.6vw, 2.2rem);
+  line-height: 1.1;
+  letter-spacing: -0.02em;
+  margin: 0 0 var(--space-3);
+  color: var(--color-text);
+}
+
+.auth-lead {
+  color: var(--color-text-muted);
+  font-size: var(--text-sm);
+  line-height: var(--leading-body);
+  margin: 0 0 var(--space-6);
+}
+
+.auth-form { display: flex; flex-direction: column; gap: var(--space-4); }
+
+.auth-submit { width: 100%; margin-top: var(--space-2); }
+
+.auth-error {
+  padding: var(--space-3);
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--color-status-fail);
+  background: var(--color-status-fail-soft);
+  color: var(--color-status-fail);
+  font-size: var(--text-sm);
+}
+
+.auth-switch {
+  margin-top: var(--space-5);
+  padding: 0;
+  min-height: 0;
+  background: none;
+  border: none;
+  color: var(--color-text-muted);
+  font-size: var(--text-sm);
+  font-family: var(--font-body);
+  text-decoration: underline;
+  text-underline-offset: 3px;
+  cursor: pointer;
+}
+.auth-switch:hover { color: var(--color-text); background: none; }
+
+/* ---- Role picker --------------------------------------------------------- */
+
+.role-picker { display: grid; grid-template-columns: 1fr 1fr; gap: var(--space-2); }
+
+.role-card {
+  position: relative;
+  display: block;
+  padding: var(--space-3);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  background: var(--color-surface-sunk);
+  cursor: pointer;
+  transition: border-color var(--dur-fast) var(--ease-out), background var(--dur-fast) var(--ease-out);
+}
+.role-card input { position: absolute; opacity: 0; pointer-events: none; }
+.role-card.is-on {
+  border-color: var(--color-focus-ring);
+  background: color-mix(in oklab, var(--color-accent) 14%, transparent);
+}
+.role-card:focus-within {
+  box-shadow: 0 0 0 3px color-mix(in oklab, var(--color-focus-ring) 26%, transparent);
+}
+.role-name {
+  display: block;
+  font-size: var(--text-sm);
+  font-weight: var(--weight-semi);
+  color: var(--color-text);
+}
+.role-desc {
+  display: block;
+  font-size: 0.68rem;
+  color: var(--color-text-muted);
+  margin-top: 3px;
+  line-height: 1.35;
+}
+
+@media (max-width: 900px) {
+  .auth { grid-template-columns: 1fr; }
+  .auth-stage { display: none; }
+  .auth-panel { border-left: none; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .auth-specimen-scan { animation: none; opacity: 0; }
+}

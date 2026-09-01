@@ -4,14 +4,57 @@ Requires the Tesseract binary + language data installed on the host (see ARCHITE
 If unavailable, raises OcrUnavailableError with a clear message rather than crashing the API —
 callers (api/scans.py) turn this into a 503 with an actionable error, and the rule engine /
 extraction layer remain fully unit-testable without a live OCR install.
+
+SPEED -- options considered and deliberately NOT taken, so they are not re-proposed as
+oversights. Everything below is a real, commonly-recommended Tesseract speed-up that is wrong
+for THIS pipeline specifically; what was taken instead is OCR_REFINE_WORKERS + OMP_THREAD_LIMIT
+below (both measured), plus MIN_REFINABLE_ALNUM_CHARS (measured, already here).
+
+  * `-c tessedit_do_invert=0` (skip Tesseract's light-text-on-dark retry). Measured a real ~15%
+    win here with no field changes -- on demo_data, whose 12 labels are ALL dark-text-on-light,
+    so the test set is structurally incapable of showing what this costs. Dark packaging with
+    light text is ordinary on Indian retail shelves, and this is exactly the enforcement tool
+    that must read those. Not worth 15% of one request.
+  * `tessedit_char_whitelist`. Not applicable: this reads free-form bilingual label text across
+    three scripts, so there is no restricted alphabet to whitelist.
+  * tessdata_fast models. A host/deploy choice, not a code change -- swapping the .traineddata
+    files under TESSDATA_PREFIX needs no edit here. Not adopted because its accuracy cost falls
+    hardest on Devanagari/Gujarati, which is where this pipeline's reads are already most
+    fragile (see MIXED_SCRIPT_NOISE_TOLERANCE, and the reverted confidence floor above).
+  * tesserocr / the libtesseract C++ API, replacing pytesseract. This is the one genuinely large
+    remaining win: pytesseract spawns a subprocess and reloads all three language models from
+    disk on EVERY call, and this pipeline makes dozens per scan -- an in-process binding loads
+    the models once. Not done here because it needs a compiled binding against the host's exact
+    libtesseract, which is a real deployment risk on the free-tier container this runs on for a
+    prototype. Threading the existing subprocess calls (OCR_REFINE_WORKERS) recovers a large
+    part of the same win at none of that risk. If OCR latency ever needs to drop further, this
+    is the next thing to do, behind a fallback to pytesseract when the binding is unavailable.
+  * Cropping to a region of interest / pre-binarizing. Already handled: _crop_region crops each
+    line before its refinement pass, and preprocess() caps resolution (config.py's
+    MAX_PROCESSING_DIMENSION) rather than feeding Tesseract a raw 12MP photo. A pre-binarization
+    pass was not added -- see the reverted grayscale experiment at OCR_REFINE_WORKERS below for
+    what happens to Devanagari when this module makes Tesseract's own thresholding decisions.
 """
 from __future__ import annotations
 
+import os
 import shutil
+from concurrent.futures import ThreadPoolExecutor
 
 import numpy as np
 
 from app.extraction.fields import OcrRegion
+
+# Tesseract multi-threads a SINGLE image via OpenMP by default. This pipeline instead gets its
+# parallelism ACROSS crops (see OCR_REFINE_WORKERS), so leaving OpenMP on means each of those
+# concurrent tesseract processes ALSO fans out its own thread team -- fine on a many-core dev
+# box, oversubscription on the single shared vCPU this actually deploys to.
+# Honest scope: measured on a 16-core dev box this is a wash for speed (within run-to-run noise
+# either way, with or without the pool). It is here to bound CPU/memory contention on the small
+# container, not because it was observed to make anything faster locally. Set at import, before
+# the first pytesseract call, so every tesseract subprocess inherits it; setdefault rather than
+# assignment so an operator who has tuned this for their host still wins.
+os.environ.setdefault("OMP_THREAD_LIMIT", "1")
 
 SUPPORTED_LANGS = ("eng", "hin", "guj")
 
@@ -55,6 +98,52 @@ MIXED_SCRIPT_NOISE_TOLERANCE = 2
 # combined model reads reliably in either script -- refinement exists for longer, more ambiguous
 # lines, which this does not touch.
 MIN_REFINABLE_ALNUM_CHARS = 3
+
+# How many refinement crops to OCR concurrently. Each _ocr_crop call is a *subprocess* spawn
+# (pytesseract shells out to the tesseract binary), so the calling thread spends essentially all
+# of its time blocked in wait() with the GIL released -- threads give real parallelism here, and
+# a process pool would only add pickling and interpreter-startup cost on top of a subprocess we
+# are already paying for.
+#
+# This is the single biggest speed lever in this file, because per-call FIXED cost dominates:
+# every crop pays a fresh process spawn plus a full reload of the eng+hin+guj traineddata from
+# disk, regardless of how tiny the crop is -- ~124ms for a crop holding one short text line.
+# Measured on a 33-region composite (2486px, matching the ~36 merged regions a real deployed
+# phone photo produced), full two-pass psm3+psm12 OCR: refinement was 8.5s of 11.2s -- 76% of
+# the whole thing -- and this takes it to 2.3s of 4.9s. Byte-identical output: all 12 demo
+# labels x both psm modes produce the same region texts AND the same extracted fields as the
+# sequential version (locked in by tests/test_ocr_engine.py's two concurrency tests).
+#
+# Memory, measured rather than assumed -- this is the reason 4 is a fixed small number and not
+# "one worker per crop". The cost of a pool here lives in CHILD processes, which never appear in
+# this process's RSS, so tests/test_memory_ceiling.py structurally cannot see it. Sampling the
+# tesseract children's combined RSS directly during a scan: peak 112 MB at 1 worker vs 111 MB at
+# 4 -- unchanged, because peak child memory is set by the ONE full-image first pass, not by the
+# refinement crops, which are single text lines and tiny by comparison. So 4 workers is close to
+# free on the 512 MB Render container whose ceiling is already load-bearing (see config.py's
+# MAX_PROCESSING_DIMENSION and tests/test_memory_ceiling.py -- a real OOM-kill, not a
+# hypothetical), but that headroom is only free while the crops stay small; raising this to
+# where several FULL-image passes could overlap would spend it. Beyond 4 the returns flatten
+# anyway (6 and 8 workers measured within noise of each other), and the deploy target has far
+# fewer cores than the 16-core box these numbers came from. Env-overridable so a bigger host can
+# raise it without a code change.
+OCR_REFINE_WORKERS = max(1, int(os.environ.get("OCR_REFINE_WORKERS", "4")))
+
+# Speed dead end, TRIED AND REVERTED -- do not re-apply: converting the image to single-channel
+# grayscale ONCE in run_ocr() and handing that to every Tesseract call. The reasoning is sound
+# on paper (Tesseract greyscales and binarizes internally anyway, so the colour channels never
+# reach the recognizer -- they only triple the size of the image pytesseract serialises to a
+# temp file on every call) and it measured a real ~15% win with no field changes on the first
+# labels tested. Testing all 12 demo labels individually, rather than a composite, showed it
+# regresses real reads: on 09_hindi_manufacturer_bilingual.png the Devanagari consumer-care line
+# "ग्राहक सेवा; 1800-777-8888, care@..." degraded to Latin gibberish ("Uleh Gal: ..."), losing
+# consumer_care_name and consumer_care_address entirely and truncating the email; 03's "incl. of
+# all taxes" also broke, dropping mrp_inclusive_of_taxes_stated. OpenCV's BT.601 luma weights
+# are not what Leptonica's own conversion does, and the difference is enough to change thin
+# Devanagari stroke/matra contrast against a coloured background. The colour->gray conversion is
+# Tesseract's to make, not ours. Any future variant of this idea must be validated per-label
+# across all 12 demo labels including the Hindi and Gujarati ones -- a composite or an
+# English-only subset will not show this.
 
 
 class OcrUnavailableError(RuntimeError):
@@ -238,41 +327,60 @@ def _dominant_script(text: str) -> str:
     return "mixed"
 
 
+def _refine_one_region(
+    image: np.ndarray, region: OcrRegion, langs: tuple[str, ...], lang_string: str
+) -> OcrRegion:
+    """Re-OCRs one merged line against its dominant script's model. Pure function of its
+    arguments -- no shared mutable state -- which is what makes it safe to run these
+    concurrently in _refine_regions_by_script."""
+    if sum(c.isalnum() for c in region.text) < MIN_REFINABLE_ALNUM_CHARS:
+        # Too short to ever match an anchor keyword or a NET_QTY_RE/MRP_VALUE_RE pattern --
+        # see MIN_REFINABLE_ALNUM_CHARS. Keep the first-pass combined-model reading as-is
+        # rather than spending a second Tesseract call on it.
+        return region
+    crop = _crop_region(image, region)
+    script = _dominant_script(region.text)
+    if script in langs:
+        text, conf = _ocr_crop(crop, script)
+        lang = script
+        if conf < 0:  # single-language model produced nothing usable -- fall back
+            text, conf = _ocr_crop(crop, lang_string)
+            lang = lang_string
+    else:
+        text, conf = _ocr_crop(crop, lang_string)
+        lang = lang_string
+    if conf < 0:
+        # every candidate came back empty (e.g. a crop too small/blank) -- keep the
+        # original combined-model line rather than discarding it.
+        return region
+    return OcrRegion(
+        text=text, x=region.x, y=region.y, width=region.width, height=region.height,
+        confidence=conf, language=lang,
+    )
+
+
 def _refine_regions_by_script(
     image: np.ndarray, regions: list[OcrRegion], langs: tuple[str, ...]
 ) -> list[OcrRegion]:
+    """Refines every merged line concurrently (see OCR_REFINE_WORKERS for why, and for the
+    measured cost this exists to cut).
+
+    executor.map, not as_completed: it yields results in ARGUMENT order, so the returned list
+    keeps exactly the region order the sequential version produced. Downstream extraction is
+    order-sensitive -- extraction/fields.py walks regions in reading order to associate anchors
+    with the values that follow them -- so this must not become "whichever crop finishes first."
+    Each region is refined independently by _refine_one_region and nothing is shared between
+    them, so concurrency changes only the timing, never the output."""
     lang_string = "+".join(langs)
-    refined: list[OcrRegion] = []
-    for region in regions:
-        if sum(c.isalnum() for c in region.text) < MIN_REFINABLE_ALNUM_CHARS:
-            # Too short to ever match an anchor keyword or a NET_QTY_RE/MRP_VALUE_RE pattern --
-            # see MIN_REFINABLE_ALNUM_CHARS. Keep the first-pass combined-model reading as-is
-            # rather than spending a second Tesseract call on it.
-            refined.append(region)
-            continue
-        crop = _crop_region(image, region)
-        script = _dominant_script(region.text)
-        if script in langs:
-            text, conf = _ocr_crop(crop, script)
-            lang = script
-            if conf < 0:  # single-language model produced nothing usable -- fall back
-                text, conf = _ocr_crop(crop, lang_string)
-                lang = lang_string
-        else:
-            text, conf = _ocr_crop(crop, lang_string)
-            lang = lang_string
-        if conf < 0:
-            # every candidate came back empty (e.g. a crop too small/blank) -- keep the
-            # original combined-model line rather than discarding it.
-            refined.append(region)
-            continue
-        refined.append(
-            OcrRegion(
-                text=text, x=region.x, y=region.y, width=region.width, height=region.height,
-                confidence=conf, language=lang,
-            )
+    if not regions:
+        return []
+    if OCR_REFINE_WORKERS == 1 or len(regions) == 1:
+        return [_refine_one_region(image, r, langs, lang_string) for r in regions]
+    workers = min(OCR_REFINE_WORKERS, len(regions))
+    with ThreadPoolExecutor(max_workers=workers) as pool:
+        return list(
+            pool.map(lambda r: _refine_one_region(image, r, langs, lang_string), regions)
         )
-    return refined
 
 
 def _merge_adjacent_words(

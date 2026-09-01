@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 import os
 import uuid
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 
 import cv2
 import numpy as np
@@ -12,7 +12,7 @@ from fastapi.responses import FileResponse
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
-from app.api.auth import get_current_user
+from app.api.auth import get_current_user, require_role
 from app.api.rate_limit import enforce_scan_rate_limit
 from app.config import (
     ALLOWED_UPLOAD_CONTENT_TYPES,
@@ -21,15 +21,20 @@ from app.config import (
     STORAGE_DIR,
 )
 from app.db import get_db
-from app.extraction.fields import extract_declarations, merge_declarations
-from app.models.orm import Product, Scan
+from app.extraction.fields import (
+    extract_declarations,
+    merge_declarations,
+    merge_vision_into_ocr,
+)
+from app.models.orm import Product, RuleVerification, Scan
 from app.ocr.engine import OcrUnavailableError, run_ocr
+from app.vision.gemini import extract_with_gemini
 from app.ocr.preprocess import assess_image_quality_floor, cap_dimension, preprocess
 from app.reports.annotate import draw_annotations
 from app.reports.docx_export import generate_docx_report
 from app.reports.pdf import generate_pdf_report
 from app.rules.engine import run_all_checks
-from app.rules.schema import ComplianceReport
+from app.rules.schema import ComplianceReport, RuleResult, Status
 
 router = APIRouter(prefix="/api/scans", tags=["scans"])
 
@@ -165,6 +170,19 @@ async def create_scan(
     declarations_primary = extract_declarations(regions_primary)
     declarations_secondary = extract_declarations(regions_secondary)
     declarations = merge_declarations(declarations_primary, declarations_secondary)
+
+    # Third, independent read of the same label by a vision model, merged per field into the OCR
+    # result. Returns None whenever it cannot run -- no API key, no network, rate-limited,
+    # timeout -- and the scan then completes on OCR alone exactly as it did before this existed.
+    # Deliberately not wrapped in its own try/except here: extract_with_gemini's whole contract
+    # is that it never raises (see its docstring), and catching again here would only hide a
+    # genuine bug in this pipeline behind a "vision unavailable" message.
+    #
+    # It supplies field VALUES only. Every PASS/FAIL below still comes from the deterministic
+    # rule engine, and Rules 7 and 8 still measure against OCR's bounding boxes.
+    vision_declarations = extract_with_gemini(pre.final)
+    if vision_declarations is not None:
+        declarations = merge_vision_into_ocr(declarations, vision_declarations)
     declarations.image_height_px, declarations.image_width_px = pre.final.shape[:2]
     if commodity_category:
         # Overrides the OCR-unit-derived guess -- see extraction/fields.py: inferring category
@@ -303,3 +321,142 @@ def get_scan_annotated_image(
     if not scan or not scan.annotated_image_path or not os.path.exists(scan.annotated_image_path):
         raise HTTPException(404, "Annotated image not found")
     return FileResponse(scan.annotated_image_path, media_type="image/jpeg")
+
+
+class VerifyRuleRequest(BaseModel):
+    note: str | None = None
+
+
+@router.post("/{scan_id}/rule-results/{rule_id}/verify", response_model=ScanDetail)
+def verify_rule_result(
+    scan_id: int,
+    rule_id: str,
+    req: VerifyRuleRequest,
+    db: Session = Depends(get_db),
+    user: dict = Depends(require_role("admin")),
+):
+    """Records an admin's manual verification of a NEEDS_VERIFICATION result, upgrading it to PASS.
+
+    NEEDS_VERIFICATION is this system's honest "the pipeline could not decide" -- no calibration
+    reference for a Rule 7 numeral height, two extraction engines disagreeing, a declaration read
+    at low confidence. Resolving those needs the physical package in someone's hand, which is
+    exactly what an inspector has and the pipeline never will. Without this endpoint that
+    judgement had nowhere to go: the report stayed permanently indeterminate no matter how many
+    times a human confirmed it.
+
+    Constrained deliberately, because "let a human set the status" is a much more dangerous
+    feature than it sounds:
+
+      * ADMIN ONLY. Ordinary inspectors create scans; overriding a machine finding is a
+        supervisory act with a named signature attached to it.
+      * ONLY from NEEDS_VERIFICATION. A FAIL is a positive finding of non-compliance that the
+        engine could cite a rule for, and this endpoint must never become a way to clear one --
+        that is the difference between resolving an open question and overturning a verdict.
+        A PASS and a NOT_APPLICABLE have nothing to resolve. All are rejected with 409.
+      * NEVER SILENT. The engine's original result is preserved on the row, the verifying admin
+        and timestamp are recorded, and the disclosure is prepended to `notes` -- which the PDF
+        and DOCX exporters render verbatim, so no export can show the upgraded PASS without
+        showing who upgraded it and what the engine had said.
+
+    Reports are regenerated here rather than left alone: they are written once at scan time, so
+    an admin who verified a rule and then downloaded the PDF would otherwise get a document that
+    still said NEEDS_VERIFICATION, silently contradicting the UI it was downloaded from.
+    """
+    scan = db.query(Scan).filter(Scan.id == scan_id).first()
+    if not scan:
+        raise HTTPException(404, "Scan not found")
+
+    results = json.loads(scan.rule_results_json)
+    target = next((r for r in results if r.get("rule_id") == rule_id), None)
+    if target is None:
+        raise HTTPException(404, f"Rule {rule_id} not found on this scan")
+
+    current = target.get("status")
+    if current != Status.NEEDS_VERIFICATION.value:
+        raise HTTPException(
+            409,
+            f"Rule {rule_id} is {current}, not NEEDS_VERIFICATION. Only a result the engine could "
+            f"not decide may be resolved by manual verification.",
+        )
+
+    verified_at = datetime.now(timezone.utc)
+    note = (req.note or "").strip()
+    disclosure = (
+        f"Manually verified as compliant by {user['email']} on "
+        f"{verified_at.strftime('%Y-%m-%d %H:%M UTC')} (automated result: NEEDS_VERIFICATION)."
+    )
+    if note:
+        disclosure = f"{disclosure} Verifier's note: {note}"
+
+    target["status"] = Status.PASS.value
+    target["original_status"] = Status.NEEDS_VERIFICATION.value
+    target["verified_by"] = user["email"]
+    target["verified_at"] = verified_at.isoformat()
+    target["verification_note"] = note or None
+    # Prepended, not appended: this is the single most important thing to read about this row,
+    # and the machine's own notes (which still explain why it could not decide) follow it.
+    target["notes"] = f"{disclosure} {target.get('notes') or ''}".strip()
+
+    # Rebuilt through ComplianceReport rather than adjusted by hand so the score and overall
+    # status stay defined in exactly one place (schema.py's properties) for both a fresh scan and
+    # a verified one -- an independently recomputed score here is how the two silently drift.
+    report = ComplianceReport(
+        ruleset_version=scan.ruleset_version,
+        results=[RuleResult.model_validate(r) for r in results],
+    )
+    scan.rule_results_json = json.dumps([r.model_dump(mode="json") for r in report.results])
+    scan.overall_status = report.overall_status.value
+    scan.compliance_score = report.compliance_score
+
+    db.add(
+        RuleVerification(
+            scan_id=scan.id,
+            rule_id=rule_id,
+            original_status=Status.NEEDS_VERIFICATION.value,
+            new_status=Status.PASS.value,
+            verified_by=user["email"],
+            note=note or None,
+            created_at=verified_at,
+        )
+    )
+
+    declarations = json.loads(scan.declarations_json)
+
+    # Redraw the annotated image before the reports that embed it. It is written once at scan
+    # time, so without this a verified rule kept its old box -- and since a NEEDS_VERIFICATION
+    # rule is no longer drawn at all (see reports/annotate.py UNDRAWN_STATUSES), a rule an admin
+    # had just confirmed would stay invisible on the evidence image while the table beside it
+    # said PASS. Best-effort: the stored source image can be missing on an ephemeral disk (Render
+    # does not persist uploads across restarts), and a redraw failing is not a reason to lose the
+    # verification itself, which is already recorded above.
+    source_path = scan.preprocessed_image_path or scan.image_path
+    if scan.annotated_image_path and source_path and os.path.exists(source_path):
+        source_image = cv2.imread(source_path)
+        if source_image is not None:
+            cv2.imwrite(scan.annotated_image_path, draw_annotations(source_image, report))
+
+    if scan.pdf_report_path:
+        generate_pdf_report(
+            scan.pdf_report_path, report,
+            scan.product.name if scan.product else "Unknown", scan.inspector_email,
+            scan.annotated_image_path, scan.font_size_tier,
+            image_quality_warning=declarations.get("image_quality_warning"),
+        )
+    if scan.docx_report_path:
+        generate_docx_report(
+            scan.docx_report_path, report,
+            scan.product.name if scan.product else "Unknown", scan.inspector_email,
+            scan.font_size_tier,
+            image_quality_warning=declarations.get("image_quality_warning"),
+        )
+
+    db.commit()
+    db.refresh(scan)
+    return ScanDetail(
+        id=scan.id, product_name=scan.product.name if scan.product else "Unknown",
+        overall_status=scan.overall_status, compliance_score=scan.compliance_score,
+        created_at=scan.created_at.isoformat(), inspector_email=scan.inspector_email,
+        declarations=declarations,
+        rule_results=json.loads(scan.rule_results_json),
+        ruleset_version=scan.ruleset_version, font_size_tier=scan.font_size_tier,
+    )

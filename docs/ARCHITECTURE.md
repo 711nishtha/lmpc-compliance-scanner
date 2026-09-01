@@ -86,9 +86,11 @@ docs/
 
 ## 4. Pipeline
 
-`Image` → **resolution cap** (see below) → **preprocess** (deskew, CLAHE, upscale small text) → **OCR** (per-region language pick,
-confidence capture) → **extraction** (regex/keyword → `Declarations` object, each field carrying
-its source OCR bounding box + confidence) → **rule engine** (`Declarations` → list of `RuleResult`,
+`Image` → **resolution cap** (see below) → **preprocess** (gated deskew, CLAHE, upscale small text) → **OCR** (two page-segmentation
+passes, per-region language pick, concurrent refinement, confidence capture) → **extraction**
+(regex/keyword → `Declarations` object, each field carrying its source OCR bounding box +
+confidence) → **optional vision pass** (a second, independent read of the same photograph merged
+per field — see §4.2) → **rule engine** (`Declarations` → list of `RuleResult`,
 each citing a row in LEGAL_REQUIREMENTS.md) → **report** (PDF/DOCX with itemized results,
 annotated image, methodology footer) → **repository** (SQLAlchemy: `Scan` row links `Product`,
 raw OCR blob, `Declarations` JSON, list of `RuleResult` JSON, and both exported files).
@@ -96,6 +98,56 @@ raw OCR blob, `Declarations` JSON, list of `RuleResult` JSON, and both exported 
 The primary output at every stage is **itemized and cited**, never a single opaque score. A
 `compliance_score` is computed only as a secondary summary (`pass_count / applicable_count`) and
 is always rendered alongside — never instead of — the itemized checklist.
+
+### 4.2 Vision-assisted extraction (`app/vision/gemini.py`)
+
+An optional second reading of the label by a hosted vision model, merged into the OCR result
+field by field (`extraction/fields.py::merge_vision_into_ocr`). It exists because Tesseract has a
+**measured** ceiling on real retail packaging that tuning does not close: on a real photographed
+packet, after fixing a bogus 30-degree deskew, adding two-column label/value association and
+tolerating stray OCR characters in anchors, OCR still read the manufacturer as
+`"Marketed By: DFM Foods Li"`, offered `"GS otal Fat (a"` as the commodity's generic name, and
+found neither the consumer-care block nor the unit sale price — all plainly printed. Two JPEG
+re-encodings of the *same* photograph disagreed with each other on the manufacturing date.
+
+The merge is asymmetric, because the two sources are good at different things:
+
+| Case | Result |
+|---|---|
+| OCR alone found it | keep it unchanged (`source: ocr`) |
+| Vision alone found it | take it (`source: vision`) — the common case on real packaging |
+| Both, and they agree | keep OCR's field for its **bounding box**, mark `ocr+vision` |
+| Both, and they disagree | keep the vision value, keep OCR's box, record OCR's reading, and force `NEEDS_VERIFICATION` |
+
+Hard constraints, all load-bearing:
+
+- **It never decides compliance.** Every PASS/FAIL still comes from `app/rules/`. The model
+  supplies evidence; the rules supply judgement.
+- **It never supplies geometry.** Rules 7 and 8 measure against real pixel coordinates, so a
+  plausible-looking box invented by a language model would silently corrupt a measurement the
+  report presents as factual. Vision-only fields carry no box, and those checks already treat a
+  box-less field as needing manual verification.
+- **Failure is never fatal.** No key, no network, HTTP 429, timeout, malformed JSON — every path
+  returns `None` and the scan completes on OCR alone, exactly as before the module existed.
+- **Disagreement is never resolved silently.** See the two-column date swap in that module's
+  prompt notes for the real case that made this rule non-negotiable.
+
+### 4.3 Human verification of an undecided finding (`api/scans.py::verify_rule_result`)
+
+`NEEDS_VERIFICATION` is the pipeline's honest "cannot decide" — no calibration reference, two
+extraction engines disagreeing, a declaration read at low confidence. Resolving those needs the
+physical package in someone's hand. An admin can therefore upgrade such a result to PASS, under
+three constraints that are the feature rather than decoration:
+
+- **admin only** — overriding a machine finding is a supervisory act with a signature attached;
+- **only from `NEEDS_VERIFICATION`** — a FAIL is a positive finding the engine could cite a rule
+  for, and this endpoint must never become a way to overturn a verdict (409 otherwise);
+- **never silent** — `original_status`, `verified_by` and `verified_at` are kept on the result, an
+  append-only `rule_verifications` row is written, and the disclosure is prepended to `notes`,
+  which the PDF and DOCX exporters render verbatim.
+
+Reports and the annotated image are regenerated on verification, so a downloaded PDF can never
+contradict the screen it was downloaded from.
 
 ### 4.1 Resolution cap — a real production incident, not a hypothetical
 

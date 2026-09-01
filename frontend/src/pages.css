@@ -1,0 +1,377 @@
+/* ==========================================================================
+   Page-level composition — repository, scan bay, scan detail
+   ========================================================================== */
+
+/* ---- Repository filter chips -------------------------------------------- */
+
+.chip-row {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  padding: var(--space-3) var(--space-5);
+  border-bottom: 1px solid var(--color-border);
+  flex-wrap: wrap;
+}
+
+.chip-row-label {
+  font-family: var(--font-mono);
+  font-size: 0.6rem;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  color: var(--color-text-muted);
+}
+
+.filter-chip {
+  margin: 0;
+  padding: 3px;
+  min-height: 0;
+  background: none;
+  border: 1px solid transparent;
+  border-radius: var(--radius-pill);
+  cursor: pointer;
+  opacity: 0.55;
+  transition: opacity var(--dur-fast) var(--ease-out), border-color var(--dur-fast) var(--ease-out);
+}
+.filter-chip:hover { opacity: 0.85; background: none; }
+/* aria-pressed carries the state for assistive tech; the ring and full opacity
+   carry it visually. Opacity alone would be too weak a signal on its own. */
+.filter-chip.is-on { opacity: 1; border-color: var(--color-border-strong); background: none; }
+
+.chip-row-count {
+  margin-left: auto;
+  font-family: var(--font-mono);
+  font-size: 0.66rem;
+  color: var(--color-text-muted);
+}
+
+.ledger-inspector {
+  font-size: var(--text-xs);
+  color: var(--color-text-muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 210px;
+}
+
+/* ---- Scan page ----------------------------------------------------------- */
+
+.scan-layout {
+  display: grid;
+  grid-template-columns: minmax(0, 1.25fr) minmax(320px, 0.75fr);
+  gap: var(--space-5);
+  align-items: start;
+}
+
+.scan-side { display: flex; flex-direction: column; gap: var(--space-5); }
+
+.scan-fields { display: flex; flex-direction: column; gap: var(--space-4); }
+.field-pair { display: grid; grid-template-columns: 1fr 1fr; gap: var(--space-3); }
+
+/* The capture bay. A generous, obviously-droppable target framed by the
+   reticle brackets -- the photograph is the whole input to this tool, so it
+   gets the space that importance deserves rather than a 32px file input. */
+/* The brackets live on this wrapper, not on .dropzone itself: the zone clips its
+   own overflow so the preview image can fill it, which was silently cutting the
+   reticle corners off. */
+.bay-frame { position: relative; margin: var(--space-5); }
+.bay-frame::before, .bay-frame::after { z-index: 2; }
+
+.dropzone {
+  position: relative;
+  overflow: hidden;
+  margin: 0;
+  min-height: 340px;
+  display: grid;
+  place-items: center;
+  border: 1px dashed var(--color-border-strong);
+  border-radius: var(--radius-md);
+  background:
+    repeating-linear-gradient(45deg,
+      color-mix(in oklab, var(--color-accent) 4%, transparent) 0 10px,
+      transparent 10px 20px),
+    var(--color-surface-sunk);
+  cursor: pointer;
+  transition: border-color var(--dur-base) var(--ease-out),
+              background-color var(--dur-base) var(--ease-out);
+}
+
+.dropzone:hover, .dropzone:focus-visible {
+  border-color: var(--color-accent-deep);
+  outline: none;
+}
+.dropzone.is-drag {
+  border-color: var(--color-accent-deep);
+  border-style: solid;
+  background-color: color-mix(in oklab, var(--color-accent) 14%, transparent);
+}
+.dropzone.has-file { border-style: solid; background: var(--color-surface-sunk); padding: 0; }
+
+.dropzone-img { display: block; width: 100%; max-height: 520px; object-fit: contain; }
+
+.dropzone-empty { text-align: center; color: var(--color-text-muted); padding: var(--space-6); }
+.dropzone-empty svg { color: var(--color-accent-deep); opacity: 0.85; }
+
+.dropzone-title {
+  font-family: var(--font-display);
+  font-size: var(--text-lg);
+  color: var(--color-text);
+  margin: var(--space-4) 0 var(--space-2);
+}
+.dropzone-hint { font-size: var(--text-xs); margin: 0; }
+
+/* The working sweep, shown only while the request is in flight. */
+.scanline {
+  position: absolute;
+  left: 0; right: 0; top: 0;
+  height: 120px;
+  background: linear-gradient(
+    180deg,
+    transparent,
+    color-mix(in oklab, var(--color-accent-deep) 45%, transparent),
+    transparent
+  );
+  animation: bay-sweep 2.4s var(--ease-out) infinite;
+  pointer-events: none;
+}
+
+@keyframes bay-sweep {
+  0%   { transform: translateY(-140px); }
+  100% { transform: translateY(560px); }
+}
+
+.bay-actions { padding: 0 var(--space-5) var(--space-5); }
+
+/* ---- Progress ------------------------------------------------------------ */
+
+.scan-progress { padding: 0 var(--space-5) var(--space-5); }
+
+.stage-list { list-style: none; margin: 0 0 var(--space-4); padding: 0; display: grid; gap: 9px; }
+
+.stage-list li {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  font-size: var(--text-sm);
+  color: var(--color-text-muted);
+  opacity: 0.5;
+  transition: opacity var(--dur-base) var(--ease-out), color var(--dur-base) var(--ease-out);
+}
+.stage-list li.is-done { opacity: 0.8; }
+.stage-list li.is-now { opacity: 1; color: var(--color-text); }
+
+.stage-dot {
+  width: 7px; height: 7px; flex: none;
+  border-radius: 50%;
+  border: 1px solid var(--color-border-strong);
+}
+.is-done .stage-dot { background: var(--color-accent-deep); border-color: var(--color-accent-deep); }
+.is-now .stage-dot {
+  background: var(--color-accent-deep);
+  border-color: var(--color-accent-deep);
+  box-shadow: 0 0 0 4px color-mix(in oklab, var(--color-accent) 26%, transparent);
+  animation: dot-pulse 1.4s var(--ease-out) infinite;
+}
+
+@keyframes dot-pulse {
+  0%, 100% { box-shadow: 0 0 0 3px color-mix(in oklab, var(--color-accent) 30%, transparent); }
+  50%      { box-shadow: 0 0 0 7px color-mix(in oklab, var(--color-accent) 10%, transparent); }
+}
+
+.stage-meta { margin: 0; font-family: var(--font-mono); font-size: 0.66rem; color: var(--color-text-muted); }
+
+.calib-note { margin: 0; font-size: var(--text-xs); color: var(--color-text-muted); line-height: var(--leading-body); }
+
+.scan-submit { width: 100%; }
+
+.scan-foot {
+  margin: 0;
+  font-size: var(--text-xs);
+  color: var(--color-text-muted);
+  line-height: var(--leading-body);
+}
+.scan-foot a { color: var(--color-text); }
+
+/* Deliberately NOT styled like an error: an unreadable photograph is not a
+   compliance finding and must never be mistaken for one. */
+.quality-panel {
+  padding: var(--space-4);
+  border: 1px solid var(--color-advisory-border);
+  border-left-width: 3px;
+  border-radius: var(--radius-sm);
+  background: var(--color-advisory-bg);
+  color: var(--color-advisory-text);
+  font-size: var(--text-sm);
+  line-height: var(--leading-body);
+}
+.quality-panel p { margin: var(--space-2) 0 0; }
+.quality-head {
+  font-family: var(--font-mono);
+  font-size: 0.65rem;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+}
+.quality-meta { font-size: var(--text-xs); opacity: 0.9; }
+
+@media (max-width: 1080px) {
+  .scan-layout { grid-template-columns: 1fr; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .scanline { animation: none; }
+  .is-now .stage-dot { animation: none; }
+}
+
+/* ==========================================================================
+   SCAN DETAIL
+   ========================================================================== */
+
+.detail-top {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(300px, 360px);
+  gap: var(--space-5);
+  align-items: start;
+  margin-bottom: var(--space-5);
+}
+
+.evidence { position: relative; }
+.evidence-img { display: block; width: 100%; border-radius: 0 0 var(--radius-lg) var(--radius-lg); }
+
+.legend {
+  display: flex;
+  gap: var(--space-4);
+  flex-wrap: wrap;
+  padding: var(--space-3) var(--space-5);
+  border-top: 1px solid var(--color-border);
+  font-size: var(--text-xs);
+  color: var(--color-text-muted);
+}
+.legend-item { display: flex; align-items: center; gap: var(--space-2); }
+.legend-swatch { width: 11px; height: 11px; border-radius: 2px; display: inline-block; }
+
+.verdict {
+  padding: var(--space-5);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+}
+
+.verdict-score {
+  font-family: var(--font-display);
+  font-size: 3.4rem;
+  line-height: 1;
+  letter-spacing: -0.03em;
+  font-variant-numeric: tabular-nums;
+}
+.verdict-score .unit { font-family: var(--font-mono); font-size: 1rem; color: var(--color-text-muted); }
+
+.tally { display: grid; gap: var(--space-2); }
+.tally-row { display: flex; align-items: center; gap: var(--space-3); font-size: var(--text-sm); }
+.tally-row .num { margin-left: auto; }
+
+.meta-list { display: grid; gap: var(--space-3); }
+.meta-row { display: flex; justify-content: space-between; gap: var(--space-3); font-size: var(--text-xs); }
+.meta-key { font-family: var(--font-mono); letter-spacing: 0.12em; text-transform: uppercase; color: var(--color-text-muted); }
+.meta-val { text-align: right; color: var(--color-text); }
+
+.export-row { display: flex; gap: var(--space-2); }
+.export-row .btn-inst { flex: 1; }
+
+/* ---- Findings ------------------------------------------------------------ */
+
+.finding {
+  display: grid;
+  grid-template-columns: 132px minmax(0, 1fr) 150px;
+  gap: var(--space-4);
+  padding: var(--space-5);
+  border-bottom: 1px solid var(--color-border);
+}
+.finding:last-child { border-bottom: none; }
+
+/* A hairline status keyline on the left of each finding. Redundant with the
+   chip's glyph and label -- an aid to scanning the column, never the signal. */
+.finding { border-left: 2px solid transparent; }
+.finding[data-status="PASS"]   { border-left-color: color-mix(in oklab, var(--color-status-pass) 55%, transparent); }
+.finding[data-status="FAIL"]   { border-left-color: var(--color-status-fail); background: color-mix(in oklab, var(--color-status-fail) 5%, transparent); }
+.finding[data-status="NEEDS_VERIFICATION"] { border-left-color: color-mix(in oklab, var(--color-status-verify) 70%, transparent); }
+
+.finding-id { font-family: var(--font-mono); font-size: 0.8rem; color: var(--color-text); font-weight: var(--weight-medium); }
+.finding-ref { font-family: var(--font-mono); font-size: 0.62rem; color: var(--color-text-muted); margin-top: 4px; line-height: 1.4; }
+.finding-req { font-size: var(--text-sm); line-height: var(--leading-body); color: var(--color-text); margin: 0; }
+
+.finding-ev {
+  margin-top: var(--space-3);
+  padding: var(--space-3);
+  border-radius: var(--radius-sm);
+  background: var(--color-surface-sunk);
+  border: 1px solid var(--color-border);
+}
+.finding-quote { font-family: var(--font-display); font-size: var(--text-sm); color: var(--color-text); }
+.finding-notes { font-size: var(--text-xs); color: var(--color-text-muted); line-height: var(--leading-body); margin: var(--space-2) 0 0; }
+
+.finding-side { display: flex; flex-direction: column; align-items: flex-end; gap: var(--space-3); }
+
+.src-tag {
+  font-family: var(--font-mono);
+  font-size: 0.56rem;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  padding: 2px 7px;
+  border-radius: var(--radius-pill);
+  border: 1px solid var(--color-border-strong);
+  color: var(--color-text-muted);
+  white-space: nowrap;
+}
+.src-tag.is-both { color: var(--color-accent-deep); border-color: var(--color-accent-deep); }
+
+.verified-note {
+  font-size: 0.66rem;
+  color: var(--color-status-verify);
+  text-align: right;
+  line-height: 1.4;
+}
+
+.verify-form { width: 100%; margin-top: var(--space-2); display: grid; gap: var(--space-2); }
+.verify-actions { display: flex; gap: var(--space-2); }
+.verify-actions .btn-inst { flex: 1; }
+
+@media (max-width: 1080px) {
+  .detail-top { grid-template-columns: 1fr; }
+  .finding { grid-template-columns: 1fr; }
+  .finding-side { align-items: flex-start; }
+}
+
+.crumb { color: inherit; text-decoration: underline; text-underline-offset: 3px; }
+.crumb:hover { color: var(--color-text); }
+
+.legend-note { color: var(--color-text-muted); opacity: 0.85; max-width: 46ch; }
+
+.sort-toggle {
+  margin: 0; padding: 4px 10px; min-height: 0;
+  background: none;
+  border: 1px solid var(--color-border-strong);
+  border-radius: var(--radius-pill);
+  color: var(--color-text-muted);
+  font-family: var(--font-mono);
+  font-size: 0.6rem;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  cursor: pointer;
+}
+.sort-toggle:hover { color: var(--color-text); background: color-mix(in oklab, var(--color-accent) 12%, transparent); }
+
+.detail-foot {
+  margin: var(--space-5) 0 0;
+  font-size: var(--text-xs);
+  color: var(--color-text-muted);
+  line-height: var(--leading-body);
+}
+
+.visually-hidden {
+  position: absolute !important;
+  width: 1px; height: 1px;
+  padding: 0; margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}

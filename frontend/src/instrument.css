@@ -1,0 +1,791 @@
+/* ==========================================================================
+   LMPC — "INSTRUMENT" app shell
+   ==========================================================================
+
+   The authenticated app used to be a single white card on cream while the
+   landing page was a dark, cinematic, editorial stage. They read as two
+   different products. This layer rebuilds the app in the landing's language
+   and pushes it further, around one idea:
+
+        THIS IS AN INSTRUMENT, NOT A DASHBOARD.
+
+   Legal *Metrology* is the science of measurement, so the visual vocabulary is
+   taken from real measuring tools rather than from generic SaaS:
+
+     · RULE TICKS   — hairline calibration scales (--tick-*) edge the rail, the
+                      page header and every readout. The signature motif.
+     · RETICLE      — corner brackets (.bracket) frame anything the inspector
+                      is meant to look AT, the way a viewfinder frames a target.
+     · READOUTS     — figures set large in the display serif over a sunken well
+                      with a mono unit label, like an engraved gauge face.
+     · ENGRAVED     — mono, uppercase, letterspaced micro-labels on plates.
+
+   Everything below is token-driven (tokens.css) and therefore works in both
+   themes. The dark theme is the design's home key; light mode is the same
+   instrument in a paper-and-brass register, not an inversion.
+
+   ACCESSIBILITY CARRIED OVER, NOT RE-LITIGATED: status colour remains a
+   REDUNDANT channel. The .badge glyphs and text labels defined in index.css
+   are still the real carriers of meaning (see tokens.css's dichromacy note).
+   Nothing here may become the sole carrier of a status.
+   ========================================================================== */
+
+:root {
+  --rail-w: 232px;
+  --rail-w-collapsed: 76px;
+
+  /* Hairline tick scale. Two densities: minor ticks every 8px, a major every
+     40px -- the proportions of a real steel rule rather than an arbitrary
+     dotted border. */
+  --tick-minor: repeating-linear-gradient(
+    to right, var(--color-border) 0 1px, transparent 1px 8px
+  );
+  --tick-major: repeating-linear-gradient(
+    to right, var(--color-border-strong) 0 1px, transparent 1px 40px
+  );
+  --tick-minor-v: repeating-linear-gradient(
+    to bottom, var(--color-border) 0 1px, transparent 1px 8px
+  );
+
+  --panel-bg: var(--color-surface);
+  --panel-glow: none;
+}
+
+[data-theme="dark"] {
+  /* In dark mode panels are not flat fills -- a very low-alpha top-light plus a
+     hairline edge is what keeps a near-black UI from reading as a void. */
+  --panel-bg: linear-gradient(180deg, #1B2029 0%, #161A22 100%);
+  --panel-glow: inset 0 1px 0 rgba(255, 255, 255, 0.045);
+}
+
+/* ==========================================================================
+   SHELL — rail + workspace
+   ========================================================================== */
+
+.inst-shell {
+  display: grid;
+  grid-template-columns: var(--rail-w) minmax(0, 1fr);
+  min-height: 100vh;
+  background: var(--color-bg);
+}
+
+/* The ambient wash. Two very wide, very low-alpha radial pools keep the large
+   dark ground from looking like a flat rectangle, at a strength that never
+   competes with content. */
+.inst-shell::before {
+  content: '';
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  z-index: 0;
+  background:
+    radial-gradient(900px 520px at 12% -10%, color-mix(in oklab, var(--color-accent) 12%, transparent), transparent 70%),
+    radial-gradient(760px 460px at 100% 8%, color-mix(in oklab, var(--color-primary) 9%, transparent), transparent 72%);
+}
+
+/* ---- Left rail ---------------------------------------------------------- */
+
+.rail {
+  position: sticky;
+  top: 0;
+  align-self: start;
+  height: 100vh;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-5);
+  padding: var(--space-5) 0 var(--space-4);
+  background: var(--color-surface-sunk);
+  border-right: 1px solid var(--color-border);
+  z-index: 3;
+}
+
+/* The rail's calibration edge -- the motif's first statement. */
+.rail::after {
+  content: '';
+  position: absolute;
+  right: 0;
+  top: 0;
+  bottom: 0;
+  width: 7px;
+  background-image: var(--tick-minor-v);
+  opacity: 0.5;
+}
+
+.rail-brand {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  padding: 0 var(--space-5);
+  text-decoration: none;
+  color: var(--color-text);
+}
+
+.rail-mark {
+  position: relative;
+  width: 30px;
+  height: 30px;
+  flex: none;
+  border: 1px solid var(--color-accent-deep);
+  border-radius: 3px;
+  display: grid;
+  place-items: center;
+  background: color-mix(in oklab, var(--color-accent) 16%, transparent);
+}
+
+/* A crosshair inside the mark: the reticle motif at its smallest size. */
+.rail-mark::before,
+.rail-mark::after {
+  content: '';
+  position: absolute;
+  background: var(--color-accent-deep);
+}
+.rail-mark::before { width: 13px; height: 1px; }
+.rail-mark::after  { width: 1px; height: 13px; }
+
+.rail-wordmark {
+  font-family: var(--font-display);
+  font-size: 0.95rem;
+  line-height: 1.1;
+  letter-spacing: -0.01em;
+}
+
+.rail-wordmark span {
+  display: block;
+  font-family: var(--font-mono);
+  font-size: 0.58rem;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  color: var(--color-text-muted);
+  margin-top: 3px;
+}
+
+.rail-nav {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 0 var(--space-3);
+}
+
+.rail-heading {
+  font-family: var(--font-mono);
+  font-size: 0.58rem;
+  letter-spacing: 0.2em;
+  text-transform: uppercase;
+  color: var(--color-text-muted);
+  padding: 0 var(--space-2) var(--space-2);
+  opacity: 0.75;
+}
+
+.rail-link {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  padding: 10px var(--space-3);
+  border-radius: var(--radius-sm);
+  text-decoration: none;
+  color: var(--color-text-muted);
+  font-size: var(--text-sm);
+  font-weight: var(--weight-medium);
+  transition: background var(--dur-fast) var(--ease-out),
+              color var(--dur-fast) var(--ease-out);
+}
+
+.rail-link:hover {
+  background: color-mix(in oklab, var(--color-accent) 10%, transparent);
+  color: var(--color-text);
+}
+
+/* The active marker is a machined notch on the rail edge, not a filled pill --
+   it reads as a setting on an instrument rather than a selected tab. */
+.rail-link.is-active {
+  color: var(--color-text);
+  background: color-mix(in oklab, var(--color-accent) 14%, transparent);
+}
+
+.rail-link.is-active::before {
+  content: '';
+  position: absolute;
+  left: calc(var(--space-3) * -1 + 2px);
+  top: 50%;
+  transform: translateY(-50%);
+  width: 3px;
+  height: 22px;
+  border-radius: 0 2px 2px 0;
+  background: var(--color-accent-deep);
+}
+
+.rail-ico {
+  width: 17px;
+  height: 17px;
+  flex: none;
+  stroke: currentColor;
+  fill: none;
+  stroke-width: 1.4;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  opacity: 0.9;
+}
+
+.rail-spacer { flex: 1; min-height: var(--space-5); }
+
+.rail-ruleset {
+  border-left: 2px solid var(--color-accent-deep);
+  padding: 2px 0 2px var(--space-3);
+  font-family: var(--font-display);
+  font-size: 0.82rem;
+  color: var(--color-text);
+  line-height: 1.25;
+}
+.rail-ruleset span,
+.rail-ruleset em {
+  display: block;
+  font-family: var(--font-mono);
+  font-style: normal;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: var(--color-text-muted);
+}
+.rail-ruleset span { font-size: 0.54rem; margin-bottom: 3px; }
+.rail-ruleset em { font-size: 0.5rem; letter-spacing: 0.1em; margin-top: 4px; text-transform: none; }
+
+.rail-foot {
+  margin-top: 0;
+  padding: 0 var(--space-4);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+}
+
+/* Identity plate: an engraved nameplate, the way real equipment carries its
+   operator/asset tag. */
+.rail-id {
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  padding: var(--space-3);
+  background: var(--panel-bg);
+  box-shadow: var(--panel-glow);
+}
+
+.rail-id-role {
+  font-family: var(--font-mono);
+  font-size: 0.58rem;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: var(--color-accent-deep);
+}
+
+.rail-id-email {
+  font-size: 0.72rem;
+  color: var(--color-text-muted);
+  margin-top: 4px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.rail-actions {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+/* ---- Workspace ---------------------------------------------------------- */
+
+.workspace {
+  position: relative;
+  z-index: 1;
+  min-width: 0;
+  padding: var(--space-6) var(--space-6) var(--space-7);
+}
+
+.workspace-inner {
+  max-width: 1240px;
+  margin: 0 auto;
+}
+
+/* ==========================================================================
+   PAGE HEADER — the instrument's title plate
+   ========================================================================== */
+
+.page-head {
+  position: relative;
+  padding-bottom: var(--space-5);
+  margin-bottom: var(--space-6);
+}
+
+/* The calibration rule under every page title. This single element does more
+   than any other to make the app feel like measuring equipment. */
+.page-head::after {
+  content: '';
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  height: 9px;
+  background-image: var(--tick-major), var(--tick-minor);
+  background-size: 100% 9px, 100% 5px;
+  background-position: bottom left;
+  background-repeat: repeat-x;
+  opacity: 0.85;
+}
+
+.page-eyebrow {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  font-family: var(--font-mono);
+  font-size: 0.62rem;
+  letter-spacing: 0.22em;
+  text-transform: uppercase;
+  color: var(--color-text-muted);
+  margin-bottom: var(--space-3);
+}
+
+.page-eyebrow::before {
+  content: '';
+  width: 22px;
+  height: 1px;
+  background: var(--color-accent-deep);
+}
+
+.page-title {
+  font-family: var(--font-display);
+  font-size: clamp(1.9rem, 3.4vw, 2.9rem);
+  line-height: 1.06;
+  letter-spacing: -0.02em;
+  margin: 0;
+  color: var(--color-text);
+}
+
+.page-sub {
+  margin: var(--space-3) 0 0;
+  max-width: 62ch;
+  color: var(--color-text-muted);
+  font-size: var(--text-base);
+  line-height: var(--leading-body);
+}
+
+.page-head-row {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: var(--space-5);
+  flex-wrap: wrap;
+}
+
+/* ==========================================================================
+   PANEL — the base surface
+   ========================================================================== */
+
+.panel {
+  position: relative;
+  background: var(--panel-bg);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--panel-glow), var(--shadow-md);
+}
+
+.panel-pad { padding: var(--space-5); }
+
+.panel-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--space-4);
+  padding: var(--space-4) var(--space-5);
+  border-bottom: 1px solid var(--color-border);
+}
+
+.panel-title {
+  font-family: var(--font-mono);
+  font-size: 0.65rem;
+  letter-spacing: 0.2em;
+  text-transform: uppercase;
+  color: var(--color-text-muted);
+  margin: 0;
+}
+
+.panel-note {
+  font-size: var(--text-xs);
+  color: var(--color-text-muted);
+}
+
+/* Reticle brackets. Applied to whatever the inspector is meant to examine --
+   the evidence image, the upload bay. Purely decorative, hence aria-hidden at
+   the markup level and no contribution to meaning. */
+.bracket { position: relative; }
+.bracket::before,
+.bracket::after {
+  content: '';
+  position: absolute;
+  width: 16px;
+  height: 16px;
+  border: 1px solid var(--color-accent-deep);
+  opacity: 0.8;
+  pointer-events: none;
+}
+.bracket::before { top: -1px; left: -1px; border-width: 1px 0 0 1px; border-radius: 3px 0 0 0; }
+.bracket::after  { bottom: -1px; right: -1px; border-width: 0 1px 1px 0; border-radius: 0 0 3px 0; }
+
+/* ==========================================================================
+   READOUT — the gauge face
+   ========================================================================== */
+
+.readout-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(190px, 1fr));
+  gap: var(--space-4);
+}
+
+.readout {
+  position: relative;
+  overflow: hidden;
+  padding: var(--space-4) var(--space-4) var(--space-5);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  background: var(--panel-bg);
+  box-shadow: var(--panel-glow);
+}
+
+/* Each readout carries its own miniature scale along the bottom edge -- the
+   detail that sells the gauge-face reading at a glance. */
+.readout::after {
+  content: '';
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  height: 6px;
+  background-image: var(--tick-minor);
+  opacity: 0.55;
+}
+
+.readout-label {
+  font-family: var(--font-mono);
+  font-size: 0.6rem;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  color: var(--color-text-muted);
+}
+
+.readout-value {
+  font-family: var(--font-display);
+  font-size: clamp(2.1rem, 4vw, 3rem);
+  line-height: 1;
+  letter-spacing: -0.03em;
+  margin-top: var(--space-3);
+  color: var(--color-text);
+  font-variant-numeric: tabular-nums;
+}
+
+.readout-value .unit {
+  font-family: var(--font-mono);
+  font-size: 0.85rem;
+  letter-spacing: 0.06em;
+  color: var(--color-text-muted);
+  margin-left: 4px;
+  vertical-align: baseline;
+}
+
+.readout-foot {
+  margin-top: var(--space-3);
+  font-size: var(--text-xs);
+  color: var(--color-text-muted);
+}
+
+/* Status-keyed readouts get a coloured top edge. Redundant with the label text
+   underneath -- never the sole signal. */
+.readout[data-status] { border-top-width: 2px; }
+.readout[data-status="PASS"]   { border-top-color: var(--color-status-pass); }
+.readout[data-status="FAIL"]   { border-top-color: var(--color-status-fail); }
+.readout[data-status="VERIFY"] { border-top-color: var(--color-status-verify); }
+
+/* ==========================================================================
+   CHART — 30-day trend as a calibrated strip
+   ========================================================================== */
+
+.chart {
+  display: flex;
+  align-items: flex-end;
+  gap: 3px;
+  height: 132px;
+  padding: var(--space-4) var(--space-5) 0;
+}
+
+.chart-col {
+  position: relative;
+  flex: 1 1 0;
+  min-width: 3px;
+  height: 100%;
+  display: flex;
+  align-items: flex-end;
+}
+
+.chart-bar {
+  width: 100%;
+  border-radius: 2px 2px 0 0;
+  background: linear-gradient(
+    180deg,
+    var(--color-accent-deep) 0%,
+    color-mix(in oklab, var(--color-accent-deep) 42%, transparent) 100%
+  );
+  transition: filter var(--dur-fast) var(--ease-out);
+  min-height: 2px;
+}
+
+.chart-col:hover .chart-bar { filter: brightness(1.25); }
+
+/* A day with no scans still gets a visible baseline tick -- an absent bar and a
+   zero bar look identical otherwise, and "no inspections that day" is real
+   information on an enforcement timeline. */
+.chart-bar.is-zero { background: var(--color-border-strong); opacity: 0.55; }
+
+.chart-axis {
+  display: flex;
+  justify-content: space-between;
+  padding: var(--space-2) var(--space-5) var(--space-4);
+  font-family: var(--font-mono);
+  font-size: 0.58rem;
+  letter-spacing: 0.1em;
+  color: var(--color-text-muted);
+  border-top: 1px solid var(--color-border);
+  margin-top: var(--space-3);
+}
+
+/* ==========================================================================
+   DATA TABLE — an inspection register
+   ========================================================================== */
+
+.ledger { width: 100%; border-collapse: collapse; }
+
+.ledger thead th {
+  position: sticky;
+  top: 0;
+  text-align: left;
+  padding: var(--space-3) var(--space-4);
+  font-family: var(--font-mono);
+  font-size: 0.6rem;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  color: var(--color-text-muted);
+  background: var(--color-surface-alt);
+  border-bottom: 1px solid var(--color-border-strong);
+  white-space: nowrap;
+}
+
+.ledger tbody td {
+  padding: var(--space-4);
+  border-bottom: 1px solid var(--color-border);
+  font-size: var(--text-sm);
+  color: var(--color-text);
+  vertical-align: middle;
+}
+
+.ledger tbody tr { transition: background var(--dur-fast) var(--ease-out); }
+.ledger tbody tr:hover { background: color-mix(in oklab, var(--color-accent) 8%, transparent); }
+.ledger tbody tr:last-child td { border-bottom: none; }
+
+.ledger-primary {
+  font-weight: var(--weight-semi);
+  color: var(--color-text);
+  text-decoration: none;
+}
+.ledger-primary:hover { text-decoration: underline; text-underline-offset: 3px; }
+
+.ledger-meta {
+  font-family: var(--font-mono);
+  font-size: 0.68rem;
+  color: var(--color-text-muted);
+  margin-top: 2px;
+}
+
+.num {
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  font-size: var(--text-sm);
+}
+
+/* Score as a miniature bar + figure: a quantity the eye can compare down a
+   column without reading every number. */
+.score-cell { display: flex; align-items: center; gap: var(--space-3); min-width: 128px; }
+
+.score-track {
+  display: block;
+  flex: 1;
+  height: 6px;
+  border-radius: 3px;
+  background: var(--color-surface-sunk);
+  border: 1px solid var(--color-border);
+  overflow: hidden;
+}
+
+/* display:block is load-bearing, not tidiness: this is a <span>, and an inline
+   box ignores height, so the fill rendered as an invisible hairline. */
+.score-fill {
+  display: block;
+  height: 100%;
+  border-radius: 3px;
+  background: var(--color-accent-deep);
+}
+.score-fill[data-band="high"] { background: var(--color-status-pass); }
+.score-fill[data-band="mid"]  { background: var(--color-status-verify); }
+.score-fill[data-band="low"]  { background: var(--color-status-fail); }
+
+/* ==========================================================================
+   CONTROLS
+   ========================================================================== */
+
+.field { display: flex; flex-direction: column; gap: var(--space-2); }
+
+.field-label {
+  font-family: var(--font-mono);
+  font-size: 0.6rem;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: var(--color-text-muted);
+}
+
+.inst-input,
+.inst-select,
+.inst-textarea {
+  width: 100%;
+  padding: 11px var(--space-3);
+  background: var(--color-surface-sunk);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  color: var(--color-text);
+  font-family: var(--font-body);
+  font-size: var(--text-sm);
+  transition: border-color var(--dur-fast) var(--ease-out),
+              box-shadow var(--dur-fast) var(--ease-out);
+}
+
+.inst-input:focus,
+.inst-select:focus,
+.inst-textarea:focus {
+  outline: none;
+  border-color: var(--color-focus-ring);
+  box-shadow: 0 0 0 3px color-mix(in oklab, var(--color-focus-ring) 26%, transparent);
+}
+
+.inst-input::placeholder { color: var(--color-text-muted); opacity: 0.75; }
+
+.filter-bar {
+  display: grid;
+  grid-template-columns: minmax(200px, 2fr) repeat(3, minmax(130px, 1fr)) auto;
+  gap: var(--space-3);
+  align-items: end;
+  padding: var(--space-4) var(--space-5);
+  border-bottom: 1px solid var(--color-border);
+}
+
+.btn-inst {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-2);
+  margin: 0;
+  padding: 11px var(--space-5);
+  min-height: 42px;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--color-primary);
+  background: var(--color-primary);
+  color: var(--color-on-primary);
+  font-family: var(--font-body);
+  font-size: var(--text-sm);
+  font-weight: var(--weight-semi);
+  cursor: pointer;
+  transition: filter var(--dur-fast) var(--ease-out), transform var(--dur-fast) var(--ease-out);
+}
+
+.btn-inst:hover:not(:disabled) { filter: brightness(1.08); }
+.btn-inst:active:not(:disabled) { transform: translateY(1px); }
+.btn-inst:disabled { opacity: 0.5; cursor: not-allowed; }
+
+.btn-ghost {
+  background: transparent;
+  color: var(--color-text);
+  border-color: var(--color-border-strong);
+}
+.btn-ghost:hover:not(:disabled) {
+  background: color-mix(in oklab, var(--color-accent) 12%, transparent);
+  filter: none;
+}
+
+/* ==========================================================================
+   EMPTY STATE
+   ========================================================================== */
+
+.empty {
+  padding: var(--space-7) var(--space-5);
+  text-align: center;
+  color: var(--color-text-muted);
+}
+
+.empty-mark {
+  width: 46px;
+  height: 46px;
+  margin: 0 auto var(--space-4);
+  border: 1px dashed var(--color-border-strong);
+  border-radius: 50%;
+  display: grid;
+  place-items: center;
+  color: var(--color-accent-deep);
+}
+
+.empty-title {
+  font-family: var(--font-display);
+  font-size: var(--text-lg);
+  color: var(--color-text);
+  margin-bottom: var(--space-2);
+}
+
+/* ==========================================================================
+   RESPONSIVE — the rail collapses to icons, then to a top bar
+   ========================================================================== */
+
+@media (max-width: 1080px) {
+  .inst-shell { grid-template-columns: var(--rail-w-collapsed) minmax(0, 1fr); }
+  .rail-wordmark,
+  .rail-link span,
+  .rail-heading,
+  .rail-id-email { display: none; }
+  .rail-brand,
+  .rail-nav,
+  .rail-foot { padding-inline: var(--space-2); }
+  .rail-link { justify-content: center; }
+  .filter-bar { grid-template-columns: 1fr 1fr; }
+}
+
+@media (max-width: 720px) {
+  .inst-shell { grid-template-columns: 1fr; }
+  .rail {
+    position: static;
+    height: auto;
+    flex-direction: row;
+    align-items: center;
+    gap: var(--space-3);
+    padding: var(--space-3);
+    border-right: none;
+    border-bottom: 1px solid var(--color-border);
+    overflow-x: auto;
+  }
+  .rail::after { display: none; }
+  .rail-nav { flex-direction: row; }
+  .rail-foot {
+    margin-top: 0;
+    margin-left: auto;
+    flex-direction: row;
+    align-items: center;
+    flex: none;
+  }
+  /* On a phone the rail is a single strip: identity and provenance are reference
+     detail, and keeping them here pushed Sign out off the edge entirely. Both
+     remain available on every larger layout. */
+  .rail-id,
+  .rail-ruleset,
+  .rail-spacer { display: none; }
+  .workspace { padding: var(--space-5) var(--space-4) var(--space-6); }
+  .filter-bar { grid-template-columns: 1fr; }
+}

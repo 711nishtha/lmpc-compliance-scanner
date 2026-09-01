@@ -46,8 +46,15 @@ NET_QTY_RE = re.compile(
     rf"(?<!\w)({NUMBER_RE})\s*(g|gm|gms|gram|grams|kg|kilogram|ml|milliliter|l|litre|liter|pcs|pieces|nos)\b",
     re.IGNORECASE,
 )
+# Alternatives are ordered MOST SPECIFIC FIRST, which is load-bearing rather than cosmetic:
+# Python's `|` is first-match, not longest-match, so with the short "\d{1,2}[/-]\d{2,4}" form
+# leading, a real full date "14/03/27" matched only its "14/03" prefix and the year was silently
+# dropped. That is actively misleading for a Rule 6(1)(d)/(da) declaration -- "14/03" reads as a
+# month/year when it is really a day/month -- and it showed up on the first real pack photo
+# scanned, whose PKD and USE BY are both printed as dd/mm/yy. The day-first form also allows a
+# single leading digit ("7/06/26") because OCR does clip a leading "1" off a date in practice.
 DATE_RE = re.compile(
-    r"(\d{1,2}[/-]\d{2,4}|[A-Za-z]{3,9}\s?\d{4}|\d{2}[/-]\d{2}[/-]\d{2,4})"
+    r"(\d{1,2}[/-]\d{1,2}[/-]\d{2,4}|[A-Za-z]{3,9}\s?\d{4}|\d{1,2}[/-]\d{2,4})"
 )
 PHONE_RE = re.compile(r"(?:\+?91[-\s]?)?\d[\d\-\s]{8,13}\d")
 # A tighter, POSITIVE pattern for the two well-known real Indian phone shapes: a 10-digit mobile
@@ -211,6 +218,53 @@ def _fuzzy_contains(text: str, term: str, max_dist: int = 1) -> bool:
     return False
 
 
+# Minimum anchor-term length before a single STRAY ADJACENT LETTER is tolerated -- see
+# _term_with_stray_letter. This is the THIRD independent case in this codebase of one spurious
+# OCR character defeating an exact anchor match (after "ml"->"mi" and "Marketed"->"Matketed"),
+# and the first where the stray character lands OUTSIDE the term instead of inside it: a real
+# pack's "NET QTY." came back from OCR as "INET QTY," -- a stray "I" welded onto the front, from
+# the printed rule line beside it. Neither existing path could see through that. The exact
+# pattern's letter-boundary guard rejects it by design, and the fuzzy path applies the SAME
+# guard to its window edges, so it rejects it too.
+#
+# 5 deliberately excludes the short anchors -- "rs", "mrp", "mfd", "mfg", "pkd", "exp." keep the
+# strict boundary. Those are exactly the terms the boundary guard was added for: "rs" tolerating
+# one stray letter is how the original "teenagers" false MRP match (see _LETTER_CLASS above)
+# would come back. Note it would NOT actually come back even here -- "rs" in "teenagers" is
+# preceded by a SEVEN-letter run, not one, so the rule below still rejects it -- but a 2-3
+# character term sitting inside real words is too cheap a collision to buy for too little.
+_STRAY_LETTER_MIN_TERM_LEN = 5
+_MAX_STRAY_ADJACENT_LETTERS = 1
+
+
+def _letter_run_length(text: str, index: int, step: int) -> int:
+    """Length of the unbroken run of letters starting at `index` and walking by `step`."""
+    count = 0
+    while 0 <= index < len(text) and text[index].isalpha():
+        count += 1
+        index += step
+    return count
+
+
+def _term_with_stray_letter(text: str, term: str) -> bool:
+    """True if `term` appears in `text` bounded by at most one stray letter on either side.
+
+    This is a strictly narrower relaxation than it may look: the letter RUN adjacent to the match
+    must be short, so a term buried inside a longer real word is still rejected. "rs" inside
+    "teenagers" has a 7-letter run in front of it and fails here exactly as it does under the
+    strict guard; "net qty" inside "INET QTY," has a 1-letter run and passes."""
+    text_lower, term_lower = text.lower(), term.lower()
+    start = text_lower.find(term_lower)
+    while start != -1:
+        end = start + len(term_lower)
+        before = _letter_run_length(text, start - 1, -1)
+        after = _letter_run_length(text, end, 1)
+        if before <= _MAX_STRAY_ADJACENT_LETTERS and after <= _MAX_STRAY_ADJACENT_LETTERS:
+            return True
+        start = text_lower.find(term_lower, start + 1)
+    return False
+
+
 def _region_matches_anchor(region: OcrRegion, group: str) -> bool:
     text = region.text
     for pattern, term in _ANCHOR_PATTERNS[group]:
@@ -219,6 +273,9 @@ def _region_matches_anchor(region: OcrRegion, group: str) -> bool:
     for _pattern, term in _ANCHOR_PATTERNS[group]:
         if len(term) >= _FUZZY_MIN_TERM_LEN and _fuzzy_contains(text, term):
             return True
+    for _pattern, term in _ANCHOR_PATTERNS[group]:
+        if len(term) >= _STRAY_LETTER_MIN_TERM_LEN and _term_with_stray_letter(text, term):
+            return True
     return False
 
 
@@ -226,6 +283,144 @@ def _find_anchor_region(regions: list[OcrRegion], group: str) -> OcrRegion | Non
     for region in regions:
         if _region_matches_anchor(region, group):
             return region
+    return None
+
+
+# Two-column "label ... value" association -- see _row_companions for the real bug and the
+# measured geometry behind both numbers.
+#
+# How far above/below the anchor's own vertical span a companion's CENTRE may sit and still count
+# as the same printed row, as a multiple of the anchor's height. Real packs do not align a value
+# perfectly with its label: measured on the DFM/Kurkure photo, "57" sits 25px ABOVE the baseline
+# of the "NET QTY." that labels it, and "17/06/26" 12px above its "PKD.". Centre-in-band rather
+# than span-overlap because the label and value are often set in different type sizes (anchor
+# heights 68-87px against value heights 41-64px on that pack), which makes a raw overlap
+# fraction swing wildly for rows that are obviously the same row to a human reader.
+ROW_BAND_TOLERANCE_RATIO = 0.5
+# Maximum horizontal whitespace between one region and the next before the row is considered
+# broken, as a multiple of the anchor's height. Measured gaps on that pack: 321px for
+# "NET QTY." -> "57" (4.0x its 80px anchor) and 493px for "PKD." -> "17/06/26" (7.3x its 68px
+# anchor). 8.0 clears both. This is the only thing stopping a row from running off across a
+# gutter into an unrelated panel, so it is a real limit, not a formality -- and note the walk
+# below chains gaps region-to-region rather than measuring one gap from the anchor, so a row can
+# only extend through text, never leap a wide blank gutter.
+ROW_MAX_GAP_HEIGHT_RATIO = 8.0
+
+
+def _row_companions(regions: list[OcrRegion], anchor: OcrRegion) -> list[OcrRegion]:
+    """Regions printed on the same visual row as `anchor`, to its right, in reading order.
+
+    Real bug this exists for, found by scanning an actual product photo rather than a demo
+    mockup (a DFM/Kurkure packet): Indian packs overwhelmingly print the mandatory declarations
+    as a two-column block -- "NET QTY. / BATCH NO. / PKD. / USE BY. / MRP" down the left, their
+    values right-aligned opposite. OCR reads those as separate regions, correctly and with high
+    confidence ("57" at conf 93, "Rs. 25.00" at conf 95), but _merge_adjacent_words joins words
+    into a line only across a gap of ~2.5x text height, so a label never merges with its value
+    across the column gutter. Every anchored extraction below then looks for its value INSIDE the
+    anchor's own region, finds "NET QTY." alone, and reports the declaration as not found. That
+    photo produced FAILs for net quantity, MRP, mfg date and consumer care -- all four plainly
+    printed -- and false FAILs are the worst error direction for an enforcement tool.
+
+    Deliberately one-directional (rightward only) and gap-chained: each gap is measured from the
+    PREVIOUS region in the row, not from the anchor, so the row grows only through continuous
+    printed content and stops dead at the first wide blank. That is what keeps a left-panel
+    anchor from reaching across a package's fold into text that has nothing to do with it."""
+    if anchor.height <= 0:
+        return []
+    tolerance = anchor.height * ROW_BAND_TOLERANCE_RATIO
+    top = anchor.y - tolerance
+    bottom = anchor.y + anchor.height + tolerance
+    max_gap = anchor.height * ROW_MAX_GAP_HEIGHT_RATIO
+
+    candidates = sorted(
+        (
+            r for r in regions
+            if r is not anchor
+            and r.x >= anchor.x + anchor.width
+            and top <= r.y + r.height / 2 <= bottom
+        ),
+        key=lambda r: r.x,
+    )
+    companions: list[OcrRegion] = []
+    cursor = anchor
+    for region in candidates:
+        if region.x - (cursor.x + cursor.width) > max_gap:
+            break
+        companions.append(region)
+        cursor = region
+    return companions
+
+
+def _row_text(anchor: OcrRegion, companions: list[OcrRegion]) -> str:
+    return " ".join([anchor.text] + [c.text for c in companions])
+
+
+def _row_region(anchor: OcrRegion, companions: list[OcrRegion]) -> OcrRegion:
+    """The anchor and its row companions as one region, so the evidence box drawn on the report
+    covers the whole "NET QTY. .... 57 g" row a human would point at, not just the label."""
+    if not companions:
+        return anchor
+    parts = [anchor] + companions
+    x = min(p.x for p in parts)
+    y = min(p.y for p in parts)
+    right = max(p.x + p.width for p in parts)
+    bottom = max(p.y + p.height for p in parts)
+    return OcrRegion(
+        text=_row_text(anchor, companions),
+        x=x, y=y, width=right - x, height=bottom - y,
+        confidence=min(p.confidence for p in parts),
+        language=anchor.language,
+    )
+
+
+def _match_in_anchor_row(
+    regions: list[OcrRegion], anchor: OcrRegion | None, matcher
+) -> tuple[OcrRegion, re.Match] | None:
+    """Finds `matcher`'s value on the anchor's printed row. Returns (evidence region, match).
+
+    Used as a FALLBACK only -- an anchor whose own region already carries its value never gets
+    here, so single-column labels behave exactly as before.
+
+    Tries the NEAREST single companion first and only then the whole row concatenated, and both
+    stages are load-bearing for a different real case on the same pack:
+
+      * nearest-first is what keeps two stacked label/value rows apart. That pack prints its
+        value column offset upward by about half a row, so "14/03/27" (the USE BY date) sits
+        vertically inside the band of the "PKD." label above it as well as its own. Concatenating
+        PKD's whole row and taking the first regex hit reported the use-by date as the
+        manufacturing date -- a wrong value, which for an enforcement tool is worse than the
+        missing one it replaced. Ranking by distance from the anchor's centre gives PKD the date
+        26px away rather than the one 42px away, and USE BY still gets its own.
+      * the concatenated row is what recovers a value OCR split across regions. "57" and its
+        unit "g" come back as two separate regions, and NET_QTY_RE needs to see "57 g" together
+        -- neither fragment matches alone, so only the joined row text works.
+
+    Evidence is the VALUE side of the row, deliberately NOT the label-plus-value union. That
+    union looked friendlier on the report but is actively wrong for Rule 8(1)'s proviso, which
+    measures clear space in multiples of the NUMERAL's own size: R8-2 reads this field's bounding
+    box, and a box stretched across the column gutter (737px wide for a 151px "57 g" on the pack
+    this was built from) inflates the required buffer to something the rule never asks for, which
+    manufactures a violation. Pointing at the value keeps the geometry honest, and the value is
+    the more useful thing to highlight as evidence anyway."""
+    if anchor is None:
+        return None
+    companions = _row_companions(regions, anchor)
+    if not companions:
+        return None
+    anchor_center = anchor.y + anchor.height / 2
+    nearest_first = sorted(
+        companions, key=lambda c: abs((c.y + c.height / 2) - anchor_center)
+    )
+    for companion in nearest_first:
+        match = matcher(companion.text)
+        if match:
+            return companion, match
+    match = matcher(_row_text(anchor, companions))
+    if match:
+        # Matched only once the row was read as a whole (a value OCR split across regions, e.g.
+        # "57" and its unit "g"), so the evidence is the value column's own extent -- the
+        # companions without the label.
+        return _row_region(companions[0], companions[1:]), match
     return None
 
 
@@ -251,6 +446,14 @@ def extract_declarations(regions: list[OcrRegion]) -> Declarations:
     if mrp_region:
         norm = _normalize_digits(mrp_region.text)
         m = MRP_VALUE_RE.search(norm) or MRP_VALUE_BARE_RE.search(norm)
+        if not m:
+            # "MRP" in one region, "Rs. 25.00" in the value column -- see _row_companions.
+            found = _match_in_anchor_row(
+                regions, mrp_region,
+                lambda t: MRP_VALUE_RE.search(_normalize_digits(t)),
+            )
+            if found:
+                mrp_region, m = found
         if m:
             d.mrp_value = _to_extracted_field(mrp_region, m.group(1))
     tax_region = _find_anchor_region(regions, "tax_inclusive")
@@ -259,6 +462,17 @@ def extract_declarations(regions: list[OcrRegion]) -> Declarations:
 
     # Net quantity
     nq_region = _find_anchor_region(regions, "net_qty")
+    if nq_region is not None and not NET_QTY_RE.search(
+        _normalize_unit_ocr_noise(_normalize_digits(nq_region.text))
+    ):
+        # "NET QTY." alone in its region, with "57" and even the unit "g" as separate regions in
+        # the value column -- all three are one printed row. See _row_companions.
+        found = _match_in_anchor_row(
+            regions, nq_region,
+            lambda t: NET_QTY_RE.search(_normalize_unit_ocr_noise(_normalize_digits(t))),
+        )
+        if found:
+            nq_region = found[0]
     search_regions = [nq_region] if nq_region else regions
     for region in search_regions:
         if region is None:
@@ -282,6 +496,12 @@ def extract_declarations(regions: list[OcrRegion]) -> Declarations:
     if mfg_region:
         norm = _normalize_digits(mfg_region.text)
         m = DATE_RE.search(norm)
+        if not m:  # "PKD." labelling a date in the value column -- see _row_companions
+            found = _match_in_anchor_row(
+                regions, mfg_region, lambda t: DATE_RE.search(_normalize_digits(t))
+            )
+            if found:
+                mfg_region, m = found
         if m:
             d.mfg_month_year = _to_extracted_field(mfg_region, m.group(1))
 
@@ -290,6 +510,12 @@ def extract_declarations(regions: list[OcrRegion]) -> Declarations:
     if bb_region:
         norm = _normalize_digits(bb_region.text)
         m = DATE_RE.search(norm)
+        if not m:  # "USE BY." labelling a date in the value column -- see _row_companions
+            found = _match_in_anchor_row(
+                regions, bb_region, lambda t: DATE_RE.search(_normalize_digits(t))
+            )
+            if found:
+                bb_region, m = found
         d.best_before_use_by = _to_extracted_field(bb_region, m.group(1) if m else bb_region.text.strip())
         d.is_perishable_category = True
 
@@ -467,4 +693,80 @@ def merge_declarations(primary: Declarations, secondary: Declarations) -> Declar
     if unit:
         merged.commodity_category = _UNIT_TO_CATEGORY.get(unit.lower(), merged.commodity_category)
 
+    return merged
+
+
+def _values_agree(ocr_value: str | None, vision_value: str | None) -> bool:
+    """Whether two readings of the same declaration are the same declaration.
+
+    Compared loosely on purpose. OCR and a vision model transcribe the same printed text with
+    different, equally legitimate conventions -- "Rs. 25.00" against "25.00", "57g" against
+    "57 g", "MRP Rs. 25.00 incl. of all taxes" against "25.00" -- and treating those as conflicts
+    would fill reports with disagreements that are nothing of the kind. So: normalise away case,
+    whitespace and punctuation, then accept if either reading contains the other. Containment
+    rather than equality is what handles OCR's habit of keeping the whole anchor line as the
+    value while the model returns just the value."""
+    if not ocr_value or not vision_value:
+        return False
+    def norm(text: str) -> str:
+        return re.sub(r"[^\w]", "", _normalize_digits(text)).lower()
+    a, b = norm(ocr_value), norm(vision_value)
+    if not a or not b:
+        return False
+    return a in b or b in a
+
+
+def merge_vision_into_ocr(ocr: Declarations, vision: Declarations) -> Declarations:
+    """Folds a vision-model read of the label into the OCR result, field by field.
+
+    This is NOT merge_declarations with a different argument: that one merges two Tesseract
+    passes, which are the same kind of evidence and are ranked against each other by OCR
+    confidence. These two sources are asymmetric and are combined on what each is actually good
+    for, not on a confidence number they do not share:
+
+      * OCR alone found it        -> keep it, unchanged.
+      * Vision alone found it     -> take it. This is the common case on real packaging and the
+                                     main reason the vision pass exists -- consumer-care blocks,
+                                     unit sale prices and tax qualifiers that OCR simply cannot
+                                     resolve on a curved, glossy or partly-defocused surface.
+      * Both, and they AGREE      -> keep OCR's field (it carries the bounding box that Rules 7
+                                     and 8 measure against) and mark it "ocr+vision". Two
+                                     independent engines reading the same declaration is the
+                                     strongest corroboration this pipeline can produce.
+      * Both, and they DISAGREE   -> keep the VISION value, keep OCR's BOX, and record what OCR
+                                     read in disagreement_note.
+
+    That last rule is the one worth defending. The vision value wins because the measured failure
+    mode on real photos is OCR mangling a declaration it did legibly locate ("Marketed By: DFM
+    Foods Li", "GS otal Fat (a"), not the reverse. But the disagreement is never thrown away: it
+    is carried into the report so an inspector sees both readings and can settle it against the
+    physical package. Silently discarding the losing read would make the report state a
+    confidence the evidence does not support.
+
+    Geometry is never taken from the vision model -- see gemini._to_field. Fields it supplies
+    alone have no bounding box, and the placement/font-size checks already treat a box-less field
+    as needing manual verification rather than guessing."""
+    merged = ocr.model_copy(deep=True)
+    for name in _MERGEABLE_EXTRACTED_FIELDS:
+        ocr_field: ExtractedField = getattr(ocr, name)
+        vision_field: ExtractedField = getattr(vision, name)
+        if not vision_field.found:
+            continue
+        if not ocr_field.found:
+            setattr(merged, name, vision_field.model_copy(deep=True))
+            continue
+        combined = ocr_field.model_copy(deep=True)
+        if _values_agree(ocr_field.value, vision_field.value):
+            combined.source = "ocr+vision"
+        else:
+            combined.value = vision_field.value
+            combined.source = "vision"
+            combined.disagreement_note = f"OCR read this as {ocr_field.value!r}"
+        setattr(merged, name, combined)
+
+    unit = merged.net_quantity_unit.value
+    if unit:
+        merged.commodity_category = _UNIT_TO_CATEGORY.get(unit.lower(), merged.commodity_category)
+    if merged.country_of_origin.found:
+        merged.is_imported = True
     return merged

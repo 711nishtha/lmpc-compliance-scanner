@@ -121,3 +121,24 @@ def test_clear_space_approximation_disclosed_in_notes():
     )
     r = pl.check_net_quantity_clear_space(d)
     assert "approximated" in r.notes.lower() or "conservative" in r.notes.lower()
+
+
+def test_net_quantity_does_not_encroach_on_its_own_clear_space():
+    """R8-2 self-exclusion must survive a declaration whose box spans more than one OCR region.
+    On real packs the value sits in a column opposite its label and OCR returns the number and
+    its unit separately ("57" and "g"), so net_quantity_value's box is their union. An exact
+    geometry match recognises neither, and the check reported the declaration's own digits and
+    unit as intruders -- a FAIL manufactured out of the declaration itself."""
+    from app.rules.placement import check_net_quantity_clear_space
+    from app.rules.schema import BoundingBox, Declarations, ExtractedField, RegionBox, Status
+
+    d = Declarations()
+    d.net_quantity_value = ExtractedField(
+        value="57", found=True, bounding_box=BoundingBox(x=1729, y=2447, width=151, height=79)
+    )
+    d.all_regions = [
+        RegionBox(x=1729, y=2447, width=86, height=64, text="57"),
+        RegionBox(x=1843, y=2461, width=37, height=65, text="g"),
+    ]
+    result = check_net_quantity_clear_space(d)
+    assert result.status == Status.PASS, result.notes

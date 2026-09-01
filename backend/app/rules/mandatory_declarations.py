@@ -11,10 +11,24 @@ from .schema import Declarations, Evidence, RuleResult, Status
 def _evidence(field) -> Evidence:
     return Evidence(
         extracted_value=field.value,
+        source=field.source,
+        disagreement_note=field.disagreement_note,
         bounding_box=field.bounding_box,
         ocr_confidence=field.ocr_confidence,
         language=field.language,
     )
+
+
+def _provenance_note(field) -> str:
+    """Human-readable provenance, appended to a result's notes. Only says something when there
+    is something to say -- a plain OCR read is the baseline and needs no annotation."""
+    if field.source == "ocr+vision":
+        return "Read independently by both OCR and the vision model, in agreement."
+    if field.source == "vision":
+        if field.disagreement_note:
+            return f"Read by the vision model; {field.disagreement_note}. Verify against the package."
+        return "Read by the vision model (OCR could not resolve this declaration)."
+    return ""
 
 
 def _found_or_fail(field, rule_id: str, rule_reference: str, requirement_text: str) -> RuleResult:
@@ -28,7 +42,8 @@ def _found_or_fail(field, rule_id: str, rule_reference: str, requirement_text: s
             notes="Declaration not found on label.",
         )
     notes = "Low OCR confidence — verify manually." if field.low_confidence else ""
-    status = Status.NEEDS_VERIFICATION if field.low_confidence else Status.PASS
+    notes = " ".join(part for part in (notes, _provenance_note(field)) if part)
+    status = Status.NEEDS_VERIFICATION if field.needs_manual_check else Status.PASS
     return RuleResult(
         rule_id=rule_id,
         rule_reference=rule_reference,
@@ -52,12 +67,12 @@ def check_manufacturer_details(d: Declarations) -> RuleResult:
             status=Status.FAIL,
             notes="Neither manufacturer name nor address found on label.",
         )
-    merged_conf = [
-        f.ocr_confidence
-        for f in (d.manufacturer_name, d.manufacturer_address)
-        if f.ocr_confidence is not None
-    ]
-    low_conf = bool(merged_conf) and min(merged_conf) < 60.0
+    # Mirrors ExtractedField.low_confidence's own rule rather than reading ocr_confidence
+    # directly: a declaration corroborated by the vision pass must not be downgraded here on a
+    # low Tesseract score the second engine has already answered. See that property's docstring.
+    low_conf = any(
+        f.needs_manual_check for f in (d.manufacturer_name, d.manufacturer_address) if f.found
+    )
     missing_part = not d.manufacturer_name.found or not d.manufacturer_address.found
     if missing_part:
         status = Status.NEEDS_VERIFICATION
@@ -141,8 +156,9 @@ def check_net_quantity(d: Declarations) -> RuleResult:
             notes=f"Solid commodity declared in unit '{unit}' — confirm this is a legitimate count-sold category.",
         )
     _ = weight_vol_units  # reserved for future stricter checks
-    conf = d.net_quantity_value.ocr_confidence
-    status = Status.NEEDS_VERIFICATION if conf is not None and conf < 60.0 else Status.PASS
+    # Via the property, not the raw score: a declaration corroborated by the vision pass is not
+    # made doubtful by Tesseract having been unsure of it. See ExtractedField.low_confidence.
+    status = Status.NEEDS_VERIFICATION if d.net_quantity_value.needs_manual_check else Status.PASS
     return RuleResult(
         rule_id=rule_id, rule_reference=ref, requirement_text=text, status=status,
         evidence=_evidence(d.net_quantity_value),
@@ -191,8 +207,9 @@ def check_mrp(d: Declarations) -> RuleResult:
             status=Status.FAIL, evidence=_evidence(d.mrp_value),
             notes="MRP found but 'inclusive of all taxes' qualifier not found — required wording missing.",
         )
-    conf = d.mrp_value.ocr_confidence
-    status = Status.NEEDS_VERIFICATION if conf is not None and conf < 60.0 else Status.PASS
+    # Via the property, not the raw score: a declaration corroborated by the vision pass is not
+    # made doubtful by Tesseract having been unsure of it. See ExtractedField.low_confidence.
+    status = Status.NEEDS_VERIFICATION if d.mrp_value.needs_manual_check else Status.PASS
     return RuleResult(
         rule_id=rule_id, rule_reference=ref, requirement_text=text, status=status,
         evidence=_evidence(d.mrp_value),

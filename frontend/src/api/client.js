@@ -12,23 +12,33 @@ export const API_BASE = (import.meta.env.VITE_API_BASE_URL || '').replace(/\/+$/
 
 const TOKEN_KEY = 'lmpc_token'
 const ROLE_KEY = 'lmpc_role'
+const EMAIL_KEY = 'lmpc_email'
 
 export function getToken() {
   return localStorage.getItem(TOKEN_KEY)
 }
 
-export function setSession(token, role) {
+export function setSession(token, role, email) {
   localStorage.setItem(TOKEN_KEY, token)
   localStorage.setItem(ROLE_KEY, role)
+  // Shown on the rail's identity plate. The API returns only a token and role, and decoding the
+  // JWT client-side just to recover the address it was issued for would be more moving parts
+  // than storing what the user already typed.
+  if (email) localStorage.setItem(EMAIL_KEY, email)
 }
 
 export function clearSession() {
   localStorage.removeItem(TOKEN_KEY)
   localStorage.removeItem(ROLE_KEY)
+  localStorage.removeItem(EMAIL_KEY)
 }
 
 export function getRole() {
   return localStorage.getItem(ROLE_KEY)
+}
+
+export function getEmail() {
+  return localStorage.getItem(EMAIL_KEY)
 }
 
 async function request(path, options = {}) {
@@ -71,6 +81,13 @@ export const api = {
     return request(`/scans${qs ? `?${qs}` : ''}`)
   },
   getScan: (id) => request(`/scans/${id}`),
+  // Admin-only. Resolves a NEEDS_VERIFICATION result to PASS after a person has checked the
+  // physical package; the backend refuses anything that is not currently NEEDS_VERIFICATION.
+  verifyRuleResult: (scanId, ruleId, note) =>
+    request(`/scans/${scanId}/rule-results/${encodeURIComponent(ruleId)}/verify`, {
+      method: 'POST',
+      json: { note },
+    }),
   createScan: (formData) => request('/scans', { method: 'POST', body: formData }),
   dashboardSummary: () => request('/dashboard/summary'),
   reportPdfUrl: (id) => `${API_BASE}/api/reports/${id}/pdf`,

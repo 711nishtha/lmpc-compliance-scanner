@@ -14,6 +14,31 @@ from pathlib import Path
 
 logger = logging.getLogger(__name__)
 
+def _load_dotenv() -> None:
+    """Loads backend/.env into the environment if present, without adding a dependency.
+
+    Real environment variables always win -- a value already exported by the shell, systemd or
+    Render's dashboard is never overwritten by a file on disk, so a stale local .env cannot
+    quietly change how a deployed instance behaves. The file is gitignored and is a local
+    development convenience only; production sets real env vars.
+    """
+    env_path = Path(__file__).resolve().parents[1] / ".env"
+    try:
+        text = env_path.read_text(encoding="utf-8")
+    except (OSError, UnicodeDecodeError):
+        return
+    for line in text.splitlines():
+        line = line.strip()
+        if not line or line.startswith("#") or "=" not in line:
+            continue
+        name, _, value = line.partition("=")
+        name, value = name.strip(), value.strip().strip('"').strip("'")
+        if name and name not in os.environ:
+            os.environ[name] = value
+
+
+_load_dotenv()
+
 # "development" | "production". Anything not explicitly "production" is treated as development.
 APP_ENV = os.environ.get("APP_ENV", "development").strip().lower()
 IS_PRODUCTION = APP_ENV == "production"
@@ -118,6 +143,37 @@ MAX_UPSCALED_DIMENSION = int(os.environ.get("MAX_UPSCALED_DIMENSION", "3200"))
 #   unreadable blur, with margin on both sides.
 MIN_IMAGE_SHORTER_SIDE_PX = int(os.environ.get("MIN_IMAGE_SHORTER_SIDE_PX", "320"))
 MIN_LAPLACIAN_VARIANCE = float(os.environ.get("MIN_LAPLACIAN_VARIANCE", "100"))
+
+# ---- Vision-assisted extraction (app/vision/gemini.py) ---------------------------------------
+# A second, independent read of the label by Gemini, merged with Tesseract's per field. It exists
+# because Tesseract has a measured ceiling on real retail packaging that no amount of tuning
+# closes -- see app/vision/gemini.py's module docstring for the specific failures on a real
+# packet photo that motivated it.
+#
+# Strictly optional, and its absence is not an error: with no key set, scans run exactly as they
+# did before, on OCR alone. That is why there is no _require_in_production() call here even
+# though this is a credential -- unlike JWT_SECRET, a missing value degrades accuracy rather
+# than silently weakening security, so refusing to boot would be the wrong trade.
+GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY", "").strip()
+# Overridable without a code change, and that is not theoretical: the first model wired up here
+# (gemini-2.5-flash) returned HTTP 404 "no longer available to new users" on a freshly issued key
+# the same day it was tried. Model availability and free-tier quotas move on the provider's
+# schedule, not this project's, so a hardcoded id is a scan outage waiting to happen. If scans
+# start coming back OCR-only, check the logs for a 404 here before suspecting the pipeline.
+GEMINI_MODEL = os.environ.get("GEMINI_MODEL", "gemini-3.1-flash-lite").strip()
+# A scan already takes ~20s on a real photo (two Tesseract passes plus per-region refinement), so
+# this is a bound on how much a third-party API may add before the request is abandoned and the
+# OCR-only result is returned.
+GEMINI_TIMEOUT_SECONDS = float(os.environ.get("GEMINI_TIMEOUT_SECONDS", "30"))
+# The image OCR sees has been UPSCALED for Tesseract (preprocess.upscale_if_needed, up to
+# MAX_UPSCALED_DIMENSION=3200). Sending that verbatim would be several MB of base64 per scan for
+# resolution a vision model gains nothing from. 1600px keeps small print legible.
+GEMINI_MAX_IMAGE_DIMENSION = int(os.environ.get("GEMINI_MAX_IMAGE_DIMENSION", "1600"))
+# Kill switch independent of the key, so vision extraction can be turned off for a run (a
+# side-by-side accuracy comparison, a quota-exhausted demo) without deleting the credential.
+VISION_EXTRACTION_ENABLED = os.environ.get(
+    "VISION_EXTRACTION_ENABLED", "true"
+).strip().lower() == "true"
 
 # ---- Rate limiting (api/rate_limit.py) -------------------------------------------------------
 SCAN_RATE_LIMIT = int(os.environ.get("SCAN_RATE_LIMIT", "12"))          # requests

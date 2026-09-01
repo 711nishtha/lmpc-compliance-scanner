@@ -30,6 +30,23 @@ STATUS_BGR = {
 # because that rule happened to run first.
 STATUS_SEVERITY = {Status.FAIL: 0, Status.NEEDS_VERIFICATION: 1, Status.PASS: 2, Status.NOT_APPLICABLE: 3}
 
+# Statuses that get no box drawn at all.
+#
+# NEEDS_VERIFICATION means the engine explicitly could NOT reach a finding -- no calibration
+# reference, two extraction engines disagreeing, a declaration read at low confidence. Drawing a
+# rectangle around a region for such a rule asserts a precision that does not exist: the box is
+# whatever OCR line the evidence came from (for R7-1 that is the merged text line, not the bare
+# numeral it claims to measure), so it points at an approximate region on behalf of a rule that
+# reached no conclusion about it. On a real photo that reads as a confident machine finding, and
+# it crowds out the boxes for rules that DID conclude something. A rule the system could not
+# decide belongs in the itemised table, where its reason is stated, not drawn on the evidence
+# image. NOT_APPLICABLE is excluded for the same reason -- there is nothing to point at.
+#
+# The severity ordering above still matters: a box shared between a FAIL and a
+# NEEDS_VERIFICATION rule is still drawn, as a FAIL, because the FAIL is a real finding about
+# that region. Only boxes cited exclusively by undrawn statuses disappear.
+UNDRAWN_STATUSES = frozenset({Status.NEEDS_VERIFICATION, Status.NOT_APPLICABLE})
+
 
 def draw_annotations(image: np.ndarray, report: ComplianceReport) -> np.ndarray:
     annotated = image.copy()
@@ -37,6 +54,8 @@ def draw_annotations(image: np.ndarray, report: ComplianceReport) -> np.ndarray:
 
     boxes: dict[tuple[int, int, int, int], list] = {}
     for r in report.results:
+        if r.status in UNDRAWN_STATUSES:
+            continue
         box = r.evidence.bounding_box
         if box is None:
             continue
