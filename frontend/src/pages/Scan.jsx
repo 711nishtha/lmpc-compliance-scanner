@@ -1,6 +1,22 @@
-import { useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { api } from '../api/client'
+
+// A scan is one synchronous request -- the backend doesn't stream real progress events, so a
+// bar claiming an exact percentage would be exactly the kind of fabricated certainty this
+// project refuses to produce elsewhere. Instead: an indeterminate bar (genuinely "still
+// working", not "N% done"), paired with captions timed off what the pipeline actually does and
+// how long each stage really takes on a real photo (measured this build cycle -- OCR alone is
+// 1-5s, the dual-pass ensemble roughly doubles that). Purely informational UI texture, not a
+// claim about progress -- if this drifts from reality, update the thresholds, not the disclaimer.
+const SCAN_STAGES = [
+  { afterMs: 0, label: 'Uploading photo…' },
+  { afterMs: 900, label: 'Checking image quality…' },
+  { afterMs: 2200, label: 'Reading the label (OCR)…' },
+  { afterMs: 7000, label: 'Extracting declarations…' },
+  { afterMs: 9000, label: 'Checking against Rule 6, 7 & 8…' },
+  { afterMs: 11000, label: 'Still working — busy or multilingual labels take longer…' },
+]
 
 export default function Scan() {
   const [file, setFile] = useState(null)
@@ -18,7 +34,22 @@ export default function Scan() {
   // the generic error line, so it can never be mistaken for (or rendered as) a compliance
   // finding. See api/scans.py's quality-floor gate and client.js's structured `err.detail`.
   const [qualityIssue, setQualityIssue] = useState(null)
+  const [elapsedMs, setElapsedMs] = useState(0)
+  const timerRef = useRef(null)
   const navigate = useNavigate()
+
+  useEffect(() => {
+    if (!loading) {
+      clearInterval(timerRef.current)
+      return
+    }
+    setElapsedMs(0)
+    const startedAt = Date.now()
+    timerRef.current = setInterval(() => setElapsedMs(Date.now() - startedAt), 200)
+    return () => clearInterval(timerRef.current)
+  }, [loading])
+
+  const stage = [...SCAN_STAGES].reverse().find((s) => elapsedMs >= s.afterMs) ?? SCAN_STAGES[0]
 
   function onFileChange(e) {
     const f = e.target.files[0]
@@ -59,7 +90,11 @@ export default function Scan() {
       <h2>Scan a package label</h2>
       <p className="muted">
         Upload a photo of the principal display panel. Declarations are checked against{' '}
-        <a href="/docs/LEGAL_REQUIREMENTS.md" target="_blank" rel="noreferrer">
+        <a
+          href="https://consumeraffairs.gov.in/pages/legal-metrology-act"
+          target="_blank"
+          rel="noreferrer"
+        >
           Legal Metrology (Packaged Commodities) Rules, 2011
         </a>
         .
@@ -124,6 +159,18 @@ export default function Scan() {
             </div>
           </div>
         </details>
+
+        {loading && (
+          <div className="scan-progress" role="status" aria-live="polite">
+            <div className="scan-progress-bar">
+              <div className="scan-progress-bar-fill" />
+            </div>
+            <p className="muted small">
+              {stage.label} ({(elapsedMs / 1000).toFixed(0)}s — usually 5-15s, longer for a
+              busy or multilingual label)
+            </p>
+          </div>
+        )}
 
         {error && <div className="error">{error}</div>}
 

@@ -166,6 +166,31 @@ button:disabled { opacity: 0.55; cursor: not-allowed; }
 
 .error { color: var(--color-status-fail); margin: var(--space-2) 0; font-size: var(--text-sm); }
 
+/* Indeterminate, not a real percentage -- see Scan.jsx's SCAN_STAGES comment on why: the
+   backend doesn't stream real progress, so a bar claiming "63% done" would be a fabricated
+   number, which is exactly what this project refuses to do anywhere else. */
+.scan-progress { margin: var(--space-2) 0; }
+.scan-progress-bar {
+  height: 6px;
+  border-radius: 999px;
+  background: var(--color-accent-soft);
+  overflow: hidden;
+}
+.scan-progress-bar-fill {
+  height: 100%;
+  width: 40%;
+  border-radius: 999px;
+  background: var(--color-accent);
+  animation: scan-progress-slide 1.1s ease-in-out infinite;
+}
+@keyframes scan-progress-slide {
+  0%   { transform: translateX(-100%); }
+  100% { transform: translateX(250%); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .scan-progress-bar-fill { animation: none; width: 100%; }
+}
+
 /* Deliberately NOT styled like .error/a FAIL row: an unreadable photo is not a compliance
    finding, so it gets the "needs verification" amber, not the "fail" red -- a viewer must never
    be able to mistake this panel for a report. See pages/Scan.jsx's qualityIssue state. */
