@@ -45,9 +45,33 @@ python -c "import secrets; print(secrets.token_urlsafe(48))"
 
 ## 2. Database schema — Alembic is authoritative
 
+**On Render the container migrates itself at start.** `backend/Dockerfile`'s CMD is
+`alembic upgrade head && uvicorn ...`, so a deploy applies any pending migration before it
+serves a single request. This is not a convenience: `APP_ENV=production` deliberately skips
+`create_all()`, and Render's **free tier has no Shell tab**, so there is no other route to run a
+migration against a deployed instance. Deploying a release that adds a table without this would
+bring the app up on the old schema and return 500 from every request that touches it.
+
+It is `&&`, not `;` — a failed migration must stop the container rather than serve against a
+schema it does not match. Check the deploy log for `Running upgrade` lines. Re-running is a no-op
+once the database is at head, which matters because the free tier restarts on every sleep/wake.
+
+Locally, run it yourself **from `backend/`** (that is where `alembic.ini` lives; running it from
+the repo root fails with `No 'script_location' key found in configuration`):
+
 ```bash
 cd backend
 alembic upgrade head
+```
+
+To apply a migration to a deployed database from your own machine — useful if a container is
+crash-looping before it can migrate — point `DATABASE_URL` at the Render Postgres **External**
+connection string (Render dashboard → your database → "External Database URL"; the *Internal*
+URL only resolves from inside Render's network):
+
+```bash
+cd backend
+DATABASE_URL="postgresql+psycopg2://USER:PASS@HOST/DB" alembic upgrade head
 ```
 
 `init_db()`'s `create_all()` is **development only** and is skipped when `APP_ENV=production`, so
@@ -131,7 +155,7 @@ after a quiet period will look far slower than the numbers above.
 ```bash
 cd backend
 python -m pytest tests/ -q                    # 170 tests
-alembic upgrade head                          # includes a3f81c7d9e42 (rule_verifications)
+alembic upgrade head                          # local only; Render migrates itself (§2)
 cd ../frontend
 npm run build
 node scripts/check-bundle-isolation.mjs       # 3D libs must not enter the app bundle
@@ -139,5 +163,5 @@ node scripts/check-bundle-isolation.mjs       # 3D libs must not enter the app b
 
 This release adds a migration (`rule_verifications`, the human-verification audit trail) and a
 new direct runtime dependency (`httpx`, pinned in `backend/requirements.txt` for the vision
-call). `alembic upgrade head` is **required** on an existing instance — without it, verifying a
-finding will fail on a missing table.
+call). On Render the migration is applied automatically by the container's start command (§2) —
+watch the deploy log for `Running upgrade 11b647e2d849 -> a3f81c7d9e42`.

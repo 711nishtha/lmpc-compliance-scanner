@@ -68,5 +68,20 @@ EXPOSE 8000
 HEALTHCHECK --interval=30s --timeout=5s --start-period=40s --retries=3 \
     CMD curl -fsS http://127.0.0.1:${PORT:-8000}/api/health || exit 1
 
-# Render injects $PORT and expects the process to bind it on 0.0.0.0.
-CMD ["sh", "-c", "uvicorn app.main:app --host 0.0.0.0 --port ${PORT:-8000}"]
+# Apply migrations, THEN serve. Render injects $PORT and expects the process to bind
+# it on 0.0.0.0.
+#
+# Migrating at container start is not a convenience here, it is the only route that
+# exists: APP_ENV=production deliberately skips create_all() because Alembic owns the
+# schema, and Render's FREE tier provides no Shell tab to run `alembic upgrade head`
+# by hand. Without this line a free-tier deploy of a release that adds a table comes up
+# against the old schema and every request touching it returns 500.
+#
+# `&&`, not `;` -- if the migration fails the container must NOT start serving. An app
+# running on a schema it does not match returns 500s anyway; failing at boot puts the
+# reason in the deploy log instead of in every user's request.
+#
+# Safe to repeat: `upgrade head` is a no-op once the database is at head, which matters
+# because the free tier restarts the container on every sleep/wake cycle. It assumes a
+# single instance applying migrations, which is what the free tier runs.
+CMD ["sh", "-c", "alembic upgrade head && uvicorn app.main:app --host 0.0.0.0 --port ${PORT:-8000}"]
