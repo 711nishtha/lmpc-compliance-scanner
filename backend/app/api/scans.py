@@ -21,7 +21,7 @@ from app.config import (
     STORAGE_DIR,
 )
 from app.db import get_db
-from app.extraction.fields import extract_declarations
+from app.extraction.fields import extract_declarations, merge_declarations
 from app.models.orm import Product, Scan
 from app.ocr.engine import OcrUnavailableError, run_ocr
 from app.ocr.preprocess import cap_dimension, preprocess
@@ -128,11 +128,24 @@ async def create_scan(
     cv2.imwrite(preprocessed_path, pre.final)
 
     try:
-        regions = run_ocr(pre.final)
+        # Two-pass ensemble, not one call: real product photos (busy, multi-panel, icons
+        # interspersed with text) measurably extract more fields correctly under psm=12
+        # ("sparse text") than the default psm=3 -- but not uniformly better, field by field, on
+        # the same photo (confirmed on 3 real deployed scans: psm=12 gained one field, lost
+        # another, on the identical image). merge_declarations() takes the best of both per
+        # field rather than betting the whole scan on one page-segmentation mode. Real cost:
+        # roughly 2x OCR time versus a single pass -- accepted deliberately, since accuracy on
+        # real photography is the more important thing to get right. Placement checks
+        # (all_regions, image dimensions) are NOT ensembled -- see merge_declarations()'s
+        # docstring -- they use psm=3's region set as the single coherent spatial layout.
+        regions_primary = run_ocr(pre.final, psm=3)
+        regions_secondary = run_ocr(pre.final, psm=12)
     except OcrUnavailableError as exc:
         raise HTTPException(503, str(exc)) from exc
 
-    declarations = extract_declarations(regions)
+    declarations_primary = extract_declarations(regions_primary)
+    declarations_secondary = extract_declarations(regions_secondary)
+    declarations = merge_declarations(declarations_primary, declarations_secondary)
     declarations.image_height_px, declarations.image_width_px = pre.final.shape[:2]
     if commodity_category:
         # Overrides the OCR-unit-derived guess -- see extraction/fields.py: inferring category
@@ -186,7 +199,10 @@ async def create_scan(
         image_path=image_path,
         preprocessed_image_path=preprocessed_path,
         annotated_image_path=annotated_path,
-        raw_ocr_json=json.dumps([r.__dict__ for r in regions]),
+        raw_ocr_json=json.dumps({
+            "psm3": [r.__dict__ for r in regions_primary],
+            "psm12": [r.__dict__ for r in regions_secondary],
+        }),
         declarations_json=declarations.model_dump_json(),
         rule_results_json=json.dumps([r.model_dump(mode="json") for r in report.results]),
         ruleset_version=report.ruleset_version,

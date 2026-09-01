@@ -69,9 +69,22 @@ def _check_tesseract_available() -> None:
         )
 
 
-def run_ocr(image: np.ndarray, langs: tuple[str, ...] = SUPPORTED_LANGS) -> list[OcrRegion]:
+def run_ocr(
+    image: np.ndarray, langs: tuple[str, ...] = SUPPORTED_LANGS, psm: int = 3
+) -> list[OcrRegion]:
     """Runs Tesseract over the image and returns line-level regions with bounding boxes,
     confidence, and a per-region dominant-script language tag.
+
+    `psm` (page segmentation mode) controls how the FIRST pass finds word layout -- 3 is
+    Tesseract's own default ("fully automatic page segmentation, no OSD"), matching this
+    function's prior unconditional behaviour exactly. Real product photos (busy, multi-panel,
+    icons interspersed with text) measurably do better under psm=12 ("sparse text with OSD") --
+    on three real deployed scans, psm=12 found 71-152% more high-confidence words than psm=3.
+    Not swapped in as the new default: field-level testing on the same three photos showed it
+    is a genuine trade, not a clean win -- psm=12's different word-grouping gained one field
+    (mfg date) but lost another (consumer-care email) on the same image. See
+    extract_declarations_ensemble() in extraction/fields.py, which runs both and merges per
+    field rather than picking one mode blindly.
 
     Two passes: (1) the combined eng+hin+guj model gives word/line layout (bounding boxes,
     merged into lines by _merge_adjacent_words) -- layout detection isn't script-dependent, so
@@ -97,7 +110,7 @@ def run_ocr(image: np.ndarray, langs: tuple[str, ...] = SUPPORTED_LANGS) -> list
 
     lang_string = "+".join(langs)
     data = pytesseract.image_to_data(
-        image, lang=lang_string, output_type=pytesseract.Output.DICT
+        image, lang=lang_string, config=f"--psm {psm}", output_type=pytesseract.Output.DICT
     )
     regions: list[OcrRegion] = []
     n = len(data["text"])

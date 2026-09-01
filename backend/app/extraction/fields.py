@@ -414,3 +414,57 @@ def _assess_image_quality(regions: list[OcrRegion], d: Declarations) -> str | No
             "clearer photo before treating this as an enforcement finding."
         )
     return None
+
+
+# Fields that carry OCR provenance (found/value/confidence/bounding box) and are therefore
+# safe to merge independently, field by field, between two separate extraction passes.
+_MERGEABLE_EXTRACTED_FIELDS = (
+    "manufacturer_name", "manufacturer_address", "country_of_origin", "common_generic_name",
+    "net_quantity_value", "net_quantity_unit", "mfg_month_year", "best_before_use_by",
+    "mrp_value", "mrp_inclusive_of_taxes_stated", "consumer_care_name", "consumer_care_address",
+    "consumer_care_phone", "consumer_care_email", "unit_sale_price",
+)
+
+_UNIT_TO_CATEGORY = {
+    "g": "solid", "gm": "solid", "gms": "solid", "gram": "solid", "grams": "solid",
+    "kg": "solid", "kilogram": "solid",
+    "ml": "liquid", "milliliter": "liquid", "l": "liquid", "litre": "liquid", "liter": "liquid",
+    "pcs": "count", "pieces": "count", "nos": "count",
+}
+
+
+def merge_declarations(primary: Declarations, secondary: Declarations) -> Declarations:
+    """Merges two independent extraction passes (e.g. from two different Tesseract page-
+    segmentation modes -- see run_ocr()'s psm parameter) into one Declarations object, field by
+    field: keep primary's value if it found one; otherwise take secondary's; if BOTH found a
+    value for the same field, keep whichever has the higher OCR confidence.
+
+    Deliberately narrow: only the 15 OCR-provenance fields (_MERGEABLE_EXTRACTED_FIELDS) are
+    merged this way. Everything else -- is_imported/is_medical_device (inspector input, not
+    OCR-derived), all_regions/image dimensions (placement checks reason about ONE photo's
+    spatial layout; mixing two different word-segmentation passes' region sets would make R8-1's
+    proximity clustering incoherent), and image_quality_warning -- is taken from `primary`
+    only, since those describe the image or a single coherent region set, not an individual
+    field's value, and have no well-defined per-field merge.
+
+    commodity_category is a special case: it is *inferred from* net_quantity_unit, not an
+    independent OCR read, so it is re-derived from whichever unit the merge actually kept
+    rather than copied from either input -- copying it independently could produce a
+    unit/category pair that don't agree (e.g. unit='ml' from secondary, category='solid'
+    left over from primary)."""
+    merged = primary.model_copy(deep=True)
+    for name in _MERGEABLE_EXTRACTED_FIELDS:
+        prim_field, sec_field = getattr(primary, name), getattr(secondary, name)
+        if not prim_field.found and sec_field.found:
+            setattr(merged, name, sec_field)
+        elif prim_field.found and sec_field.found:
+            prim_conf = prim_field.ocr_confidence or 0.0
+            sec_conf = sec_field.ocr_confidence or 0.0
+            if sec_conf > prim_conf:
+                setattr(merged, name, sec_field)
+
+    unit = merged.net_quantity_unit.value
+    if unit:
+        merged.commodity_category = _UNIT_TO_CATEGORY.get(unit.lower(), merged.commodity_category)
+
+    return merged
