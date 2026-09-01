@@ -92,6 +92,33 @@ MAX_PROCESSING_DIMENSION = int(os.environ.get("MAX_PROCESSING_DIMENSION", "2200"
 # background) can never multiply its way past this regardless of the computed factor.
 MAX_UPSCALED_DIMENSION = int(os.environ.get("MAX_UPSCALED_DIMENSION", "3200"))
 
+# ---- Minimum image-quality floor (ocr/preprocess.py: assess_image_quality_floor) --------------
+# Real bug, not a hypothetical: a 400x250px test photo (shorter side 250px) went through the
+# entire pipeline with no gate at all and came back a normal-looking itemized report -- 0% pass,
+# 5 FAILs, "manufacturer not found" etc -- indistinguishable from a genuine finding, on an image
+# where no OCR engine could plausibly have read anything. Everything above was a ceiling (memory
+# protection); nothing was a floor. These two constants close that gap. Both numbers were picked
+# empirically against real measurements, not guessed:
+#
+#   MIN_IMAGE_SHORTER_SIDE_PX -- measured shorter-side across all 12 demo_data labels: 404-739px
+#   (these are pre-cropped synthetic label mockups and must never be flagged). The known failing
+#   case measures 250px. 320px sits with ~28% margin on both sides of that gap -- comfortably
+#   below every demo label, comfortably above the failing case. A naive guess of "800px" (a
+#   plausible-sounding floor for a real phone photo) would have false-positived on all 12 demo
+#   labels, which run far smaller since they're pre-cropped mockups, not whole-shelf photos.
+#
+#   MIN_LAPLACIAN_VARIANCE -- variance of the Laplacian (edge energy) as a cheap blur/sharpness
+#   signal: catches "high enough resolution but badly out of focus," a real failure mode a photo
+#   can hit independently of resolution (confirmed: downscaling a sharp label to 400x250 actually
+#   *raises* its measured variance to ~10800 via resize aliasing -- resolution and blur are
+#   genuinely orthogonal failure modes, not the same check twice). Measured on real deployed
+#   phone-camera scans (Aldi can, two Maggi retakes): 228-790. Measured on demo_data: 2474-6806.
+#   Measured on synthetic Gaussian blur applied to a sharp demo label: mildly blurred (k=5) 362,
+#   genuinely unreadable (k=9) 38. 100 sits below every real photo on file and above genuinely
+#   unreadable blur, with margin on both sides.
+MIN_IMAGE_SHORTER_SIDE_PX = int(os.environ.get("MIN_IMAGE_SHORTER_SIDE_PX", "320"))
+MIN_LAPLACIAN_VARIANCE = float(os.environ.get("MIN_LAPLACIAN_VARIANCE", "100"))
+
 # ---- Rate limiting (api/rate_limit.py) -------------------------------------------------------
 SCAN_RATE_LIMIT = int(os.environ.get("SCAN_RATE_LIMIT", "12"))          # requests
 SCAN_RATE_WINDOW_SECONDS = int(os.environ.get("SCAN_RATE_WINDOW_SECONDS", "60"))

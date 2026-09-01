@@ -48,7 +48,15 @@ async function request(path, options = {}) {
     } catch (_) {
       /* ignore */
     }
-    throw new Error(detail)
+    // `detail` is usually a plain string, but a few endpoints (scans.py's IMAGE_QUALITY_INSUFFICIENT
+    // gate) return a structured object instead, so a caller can branch on `.code` rather than
+    // pattern-matching error text. Keep `err.message` a sane string either way (never
+    // "[object Object]"), and expose the structured body separately for callers that want it.
+    const structured = detail && typeof detail === 'object' ? detail : null
+    const err = new Error(structured ? structured.message || res.statusText : detail)
+    err.detail = structured
+    err.status = res.status
+    throw err
   }
   const contentType = res.headers.get('content-type') || ''
   if (contentType.includes('application/json')) return res.json()

@@ -24,7 +24,7 @@ from app.db import get_db
 from app.extraction.fields import extract_declarations, merge_declarations
 from app.models.orm import Product, Scan
 from app.ocr.engine import OcrUnavailableError, run_ocr
-from app.ocr.preprocess import cap_dimension, preprocess
+from app.ocr.preprocess import assess_image_quality_floor, cap_dimension, preprocess
 from app.reports.annotate import draw_annotations
 from app.reports.docx_export import generate_docx_report
 from app.reports.pdf import generate_pdf_report
@@ -107,6 +107,25 @@ async def create_scan(
     # the authoritative check that the bytes really are a decodable image.
     if image is None:
         raise HTTPException(400, "Could not decode uploaded image — is it a valid image file?")
+
+    # Quality floor BEFORE cap_dimension/preprocess touch this image -- see assess_image_quality_
+    # floor's docstring for why it has to see the image as actually uploaded. A real bug, not a
+    # hypothetical: with no floor at all, a 400x250px photo (no OCR engine could plausibly read
+    # individual characters at that size) went through the whole pipeline and produced a normal-
+    # looking itemized report -- 0% pass, 5 FAILs -- indistinguishable from a genuine finding.
+    # Failing this check is a DISTINCT response, not a report: no OCR call, no rule engine, no
+    # Scan row written. A bad photo must never be allowed to look like a bad product.
+    quality = assess_image_quality_floor(image)
+    if not quality.ok:
+        raise HTTPException(
+            status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail={
+                "code": "IMAGE_QUALITY_INSUFFICIENT",
+                "message": quality.reason,
+                "shorter_side_px": quality.shorter_side_px,
+                "laplacian_variance": round(quality.laplacian_variance, 1),
+            },
+        )
 
     # Cap resolution BEFORE anything else touches this image, including writing it to disk.
     # A real phone photo (12MP+) with no cap measurably drove a single request past 350MB RSS

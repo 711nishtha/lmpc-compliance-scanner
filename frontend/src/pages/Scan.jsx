@@ -13,6 +13,11 @@ export default function Scan() {
   const [refHeight, setRefHeight] = useState('')
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
+  // Distinct from `error`: IMAGE_QUALITY_INSUFFICIENT is not "something went wrong", it's
+  // "this photo can't be judged at all" -- rendered as its own panel below, never folded into
+  // the generic error line, so it can never be mistaken for (or rendered as) a compliance
+  // finding. See api/scans.py's quality-floor gate and client.js's structured `err.detail`.
+  const [qualityIssue, setQualityIssue] = useState(null)
   const navigate = useNavigate()
 
   function onFileChange(e) {
@@ -26,6 +31,7 @@ export default function Scan() {
     if (!file) return
     setLoading(true)
     setError('')
+    setQualityIssue(null)
     try {
       const fd = new FormData()
       fd.append('file', file)
@@ -38,7 +44,11 @@ export default function Scan() {
       const result = await api.createScan(fd)
       navigate(`/scans/${result.id}`)
     } catch (err) {
-      setError(err.message)
+      if (err.detail?.code === 'IMAGE_QUALITY_INSUFFICIENT') {
+        setQualityIssue(err.detail)
+      } else {
+        setError(err.message)
+      }
     } finally {
       setLoading(false)
     }
@@ -116,6 +126,19 @@ export default function Scan() {
         </details>
 
         {error && <div className="error">{error}</div>}
+
+        {qualityIssue && (
+          <div className="quality-floor-panel" role="alert">
+            <h3>Photo couldn't be read reliably</h3>
+            <p>{qualityIssue.message}</p>
+            <p className="muted small">
+              Measured: shorter side {qualityIssue.shorter_side_px}px, sharpness score{' '}
+              {qualityIssue.laplacian_variance}. This is not a compliance finding — no check was
+              run against this photo, and nothing was saved. Retake the photo and try again.
+            </p>
+          </div>
+        )}
+
         <button type="submit" disabled={loading || !file}>
           {loading ? 'Scanning…' : 'Scan & check compliance'}
         </button>

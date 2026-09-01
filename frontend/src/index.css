@@ -166,6 +166,19 @@ button:disabled { opacity: 0.55; cursor: not-allowed; }
 
 .error { color: var(--color-status-fail); margin: var(--space-2) 0; font-size: var(--text-sm); }
 
+/* Deliberately NOT styled like .error/a FAIL row: an unreadable photo is not a compliance
+   finding, so it gets the "needs verification" amber, not the "fail" red -- a viewer must never
+   be able to mistake this panel for a report. See pages/Scan.jsx's qualityIssue state. */
+.quality-floor-panel {
+  margin: var(--space-3) 0;
+  padding: var(--space-3);
+  border: 1px solid var(--color-status-verify);
+  background: var(--color-status-verify-soft);
+  border-radius: var(--radius-sm);
+}
+.quality-floor-panel h3 { margin: 0 0 var(--space-1); color: var(--color-status-verify); }
+.quality-floor-panel p { margin: var(--space-1) 0; }
+
 .actions { display: flex; gap: var(--space-2); margin: var(--space-3) 0; flex-wrap: wrap; }
 .actions button { margin-top: 0; width: fit-content; }
 

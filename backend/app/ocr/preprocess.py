@@ -23,9 +23,69 @@ from dataclasses import dataclass, field
 import cv2
 import numpy as np
 
-from app.config import MAX_PROCESSING_DIMENSION, MAX_UPSCALED_DIMENSION
+from app.config import (
+    MAX_PROCESSING_DIMENSION,
+    MAX_UPSCALED_DIMENSION,
+    MIN_IMAGE_SHORTER_SIDE_PX,
+    MIN_LAPLACIAN_VARIANCE,
+)
 
 MIN_TEXT_HEIGHT_PX_FOR_UPSCALE = 25
+
+
+@dataclass
+class ImageQualityFloorResult:
+    """Outcome of assess_image_quality_floor(). `ok=False` means the caller must stop -- do not
+    run OCR or the rule engine against this image at all; see api/scans.py's IMAGE_QUALITY_INSUFFICIENT
+    response path. Carries the raw metrics too, not just a verdict, so the API response and any
+    debug logging can show the actual numbers rather than a bare rejection."""
+    ok: bool
+    reason: str | None
+    shorter_side_px: int
+    laplacian_variance: float
+
+
+def assess_image_quality_floor(image: np.ndarray) -> ImageQualityFloorResult:
+    """Two independent, cheap pre-OCR gates against the two ways a photo can be genuinely
+    unreadable regardless of what the label itself says: too few pixels to contain legible text
+    at all, or high-resolution but badly out of focus. Deliberately run on the raw decoded image,
+    before cap_dimension/preprocess touch it -- resizing measurably distorts the blur signal (a
+    sharp image downscaled with area-averaging can read as MORE "sharp" by this metric due to
+    aliasing, not less), so this has to see the image as actually uploaded.
+
+    This is NOT the same thing as extraction/fields.py's _assess_image_quality: that one is a
+    post-hoc heuristic over how many *fields OCR actually found*, and can only ever produce a
+    soft warning attached to an otherwise-normal report. This one runs first, is purely pixel-
+    level (never touches OCR output), and its failure means the rule engine never runs at all.
+    See app/config.py's MIN_IMAGE_SHORTER_SIDE_PX / MIN_LAPLACIAN_VARIANCE comments for how both
+    thresholds were derived from real measurements, not guessed."""
+    h, w = image.shape[:2]
+    shorter_side = min(h, w)
+    gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY) if image.ndim == 3 else image
+    lap_var = float(cv2.Laplacian(gray, cv2.CV_64F).var())
+
+    if shorter_side < MIN_IMAGE_SHORTER_SIDE_PX:
+        return ImageQualityFloorResult(
+            ok=False,
+            reason=(
+                f"Image resolution is too low to read reliably ({w}x{h}px, shorter side "
+                f"{shorter_side}px). Retake the photo closer to the label, or at a higher "
+                f"resolution — the shorter side needs to be at least {MIN_IMAGE_SHORTER_SIDE_PX}px."
+            ),
+            shorter_side_px=shorter_side, laplacian_variance=lap_var,
+        )
+    if lap_var < MIN_LAPLACIAN_VARIANCE:
+        return ImageQualityFloorResult(
+            ok=False,
+            reason=(
+                "Image is too blurry to read reliably — the resolution is fine, but the photo "
+                "looks out of focus. Retake it with the label held steady and in focus."
+            ),
+            shorter_side_px=shorter_side, laplacian_variance=lap_var,
+        )
+    return ImageQualityFloorResult(
+        ok=True, reason=None, shorter_side_px=shorter_side, laplacian_variance=lap_var,
+    )
 
 
 @dataclass
