@@ -16,6 +16,7 @@ from app.api.auth import get_current_user, require_role
 from app.api.rate_limit import enforce_scan_rate_limit
 from app.config import (
     ALLOWED_UPLOAD_CONTENT_TYPES,
+    OCR_FAST_MODE,
     ALLOWED_UPLOAD_EXTENSIONS,
     MAX_UPLOAD_BYTES,
     STORAGE_DIR,
@@ -162,14 +163,24 @@ async def create_scan(
         # real photography is the more important thing to get right. Placement checks
         # (all_regions, image dimensions) are NOT ensembled -- see merge_declarations()'s
         # docstring -- they use psm=3's region set as the single coherent spatial layout.
-        regions_primary = run_ocr(pre.final, psm=3)
-        regions_secondary = run_ocr(pre.final, psm=12)
+        # Fast mode (small shared-CPU hosts -- see config.OCR_FAST_MODE): one pass, no
+        # per-region refinement. The vision pass supplies the field values; this pass is here
+        # for the geometry Rules 7 and 8 measure against, plus a fallback if vision is down.
+        if OCR_FAST_MODE:
+            regions_primary = run_ocr(pre.final, psm=3, refine=False)
+            regions_secondary = []
+        else:
+            regions_primary = run_ocr(pre.final, psm=3)
+            regions_secondary = run_ocr(pre.final, psm=12)
     except OcrUnavailableError as exc:
         raise HTTPException(503, str(exc)) from exc
 
     declarations_primary = extract_declarations(regions_primary)
-    declarations_secondary = extract_declarations(regions_secondary)
-    declarations = merge_declarations(declarations_primary, declarations_secondary)
+    declarations = declarations_primary
+    if regions_secondary:
+        declarations = merge_declarations(
+            declarations_primary, extract_declarations(regions_secondary)
+        )
 
     # Third, independent read of the same label by a vision model, merged per field into the OCR
     # result. Returns None whenever it cannot run -- no API key, no network, rate-limited,

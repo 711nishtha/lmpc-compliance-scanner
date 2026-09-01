@@ -175,6 +175,25 @@ VISION_EXTRACTION_ENABLED = os.environ.get(
     "VISION_EXTRACTION_ENABLED", "true"
 ).strip().lower() == "true"
 
+# ---- OCR fast mode (api/scans.py, ocr/engine.py) ---------------------------------------------
+# Cuts the OCR stage down to ONE full-image pass with no per-region script refinement.
+#
+# Why this is coherent rather than just "turn off accuracy": the second page-segmentation pass
+# and the per-line refinement both exist to squeeze better TEXT out of Tesseract. With vision
+# extraction enabled, the vision model supplies the field values far more reliably than either
+# ever did (measured on a real packet: OCR alone 3 PASS/3 FAIL, with vision 6 PASS/1 FAIL). What
+# OCR still has to supply, and the vision model cannot, is GEOMETRY -- the bounding boxes Rules 7
+# and 8 measure against. One pass produces those.
+#
+# The cost is real and should be understood: if the vision pass is unavailable (no key, quota,
+# network), a fast-mode scan is measurably weaker than a full one, because the fallback it
+# degrades to is a single unrefined OCR pass. Leave this off wherever the vision pass is not
+# configured.
+#
+# Intended for small shared-CPU hosts (Render's free tier is a fraction of one core, where the
+# refinement pool buys no parallelism at all -- Tesseract is CPU-bound -- and simply contends).
+OCR_FAST_MODE = os.environ.get("OCR_FAST_MODE", "false").strip().lower() == "true"
+
 # ---- Rate limiting (api/rate_limit.py) -------------------------------------------------------
 SCAN_RATE_LIMIT = int(os.environ.get("SCAN_RATE_LIMIT", "12"))          # requests
 SCAN_RATE_WINDOW_SECONDS = int(os.environ.get("SCAN_RATE_WINDOW_SECONDS", "60"))

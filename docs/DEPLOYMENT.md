@@ -17,6 +17,9 @@ than silently. Read this before running it anywhere other than a local demo.
 | `SCAN_RATE_LIMIT` / `SCAN_RATE_WINDOW_SECONDS` | `12` / `60` | tune to OCR capacity |
 | `ENABLE_DOCS` | `true` in dev, `false` in prod | set `true` only deliberately |
 | `OCR_REFINE_WORKERS` | `4` | raise only on a host with more cores — see below |
+| `OCR_FAST_MODE` | `false` | **set `true` on Render's free tier** — one OCR pass, no refinement |
+| `MAX_PROCESSING_DIMENSION` | `2200` | lower to `1600` on a small instance |
+| `MAX_UPSCALED_DIMENSION` | `3200` | lower to `2000` on a small instance |
 | `GEMINI_API_KEY` | unset (vision pass disabled) | optional; enables vision-assisted extraction |
 | `GEMINI_MODEL` | `gemini-3.1-flash-lite` | pin deliberately — hosted model ids get retired |
 | `GEMINI_TIMEOUT_SECONDS` | `30` | bound on how long a third-party call may add to a scan |
@@ -139,6 +142,30 @@ returns flatten, and Render's free tier has far fewer cores than a dev box.
 
 `OMP_THREAD_LIMIT=1` is set at import in `app/ocr/engine.py` so those pooled processes do not each
 fan out their own OpenMP thread team on a single shared vCPU.
+
+## 7a. Small instances — OCR fast mode
+
+The concurrency numbers above were measured on a 16-core workstation. **Render's free tier is a
+fraction of one shared CPU**, where the refinement pool buys no parallelism at all — Tesseract is
+CPU-bound, so four workers simply contend for the same sliver of CPU.
+
+`OCR_FAST_MODE=true` cuts the OCR stage to one full-image pass with no per-region refinement.
+Measured on a real packet photo: **18s → 5.7s** (two refined passes → one unrefined), with the
+compliance result unchanged, because the vision pass supplies the field values and the OCR pass
+is only needed for the geometry Rules 7 and 8 measure against.
+
+Pair it with smaller working images, which is the other big lever (OCR cost scales with pixels):
+
+```
+OCR_FAST_MODE=true
+MAX_PROCESSING_DIMENSION=1600
+MAX_UPSCALED_DIMENSION=2000
+OCR_REFINE_WORKERS=2
+```
+
+**Only enable fast mode where the vision pass is configured.** Without a working
+`GEMINI_API_KEY` it degrades to a single unrefined OCR pass, which is measurably weaker than the
+full pipeline.
 
 ## 8. Scan latency — set expectations
 

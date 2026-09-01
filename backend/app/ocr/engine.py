@@ -159,7 +159,10 @@ def _check_tesseract_available() -> None:
 
 
 def run_ocr(
-    image: np.ndarray, langs: tuple[str, ...] = SUPPORTED_LANGS, psm: int = 3
+    image: np.ndarray,
+    langs: tuple[str, ...] = SUPPORTED_LANGS,
+    psm: int = 3,
+    refine: bool = True,
 ) -> list[OcrRegion]:
     """Runs Tesseract over the image and returns line-level regions with bounding boxes,
     confidence, and a per-region dominant-script language tag.
@@ -226,7 +229,9 @@ def run_ocr(
             )
         )
     merged = _merge_adjacent_words(regions)
-    return _refine_regions_by_script(image, merged, langs)
+    if refine:
+        return _refine_regions_by_script(image, merged, langs)
+    return merged
 
 
 def _crop_region(image: np.ndarray, region: OcrRegion, pad: int = 15) -> np.ndarray:
