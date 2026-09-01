@@ -36,7 +36,7 @@ Start here:
 - **Multilingual OCR** — Tesseract with `eng` + `hin` + `guj`, run per-region with a
   dominant-script pre-pass, so a bilingual label is not forced through one model.
   Native-script numerals are normalised to Arabic digits before any value is parsed.
-- **13 itemised rule checks** — Rule 6 mandatory declarations, Rule 7 numeral height
+- **14 itemised rule checks** — Rule 6 mandatory declarations, Rule 7 numeral height
   (Table-I, with the G.S.R. 778(E) medical-device carve-out), and Rule 8 **placement**
   (R8-1/R8-2: the quantity declaration's clear-space requirement).
 - **Every verdict cited** to the clause it came from; anything unconfirmed against the

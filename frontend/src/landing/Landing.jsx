@@ -29,7 +29,7 @@ const STEPS = [
   {
     k: '03',
     title: 'Check against the Rules',
-    body: 'Thirteen itemised checks covering Rule 6 declarations, Rule 7 numeral height and Rule 8 placement — every verdict cited to the clause it came from.',
+    body: 'Fourteen itemised checks covering Rule 6 declarations, Rule 7 numeral height and Rule 8 placement — every verdict cited to the clause it came from.',
   },
   {
     k: '04',
