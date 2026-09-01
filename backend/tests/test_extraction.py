@@ -117,6 +117,39 @@ def test_net_quantity_survives_ml_misread_as_mi():
     assert d.commodity_category == "liquid"
 
 
+def test_net_quantity_still_found_when_ocr_drops_the_net_prefix():
+    """Real evidence from a real Nestle Maggi photo re-run through the current pipeline (P1
+    investigation): the genuine "NET QUANTITY: 70 g" declaration OCR'd as just 'QUANTITY: +70'
+    (psm=12 pass) -- Tesseract dropped the leading "NET" word and the unit entirely, so no
+    net_qty anchor term ("net qty"/"net quantity"/"net wt"/...) matched anywhere. Diagnosis: this
+    specific real photo's failure is that the unit token itself never survived OCR in the same
+    region as the number -- not a fixable extraction-logic bug (fabricating a unit the OCR never
+    actually produced would violate this project's "never guess" rule) -- but the anchor-less
+    fallback (scan every region for NET_QTY_RE, not just an anchor-matched one) already recovers
+    the value correctly whenever a unit IS present, exactly as it should. This test locks in that
+    real, load-bearing fallback behaviour so a future "helpful" narrowing of the anchor logic
+    can't quietly regress it back to "not found" on labels just like this one."""
+    regions = [region("QUANTITY: 70 g")]
+    d = extract_declarations(regions)
+    assert d.net_quantity_value.found
+    assert d.net_quantity_value.value == "70"
+    assert d.net_quantity_unit.value == "g"
+
+
+def test_net_quantity_honestly_not_found_when_ocr_drops_the_unit_too():
+    """The other half of the same real Maggi evidence: the ACTUAL OCR text on the real deployed
+    photo was 'QUANTITY: +70', with no unit at all surviving next to the number (unlike the
+    idealised case above, which still had 'g'). There is no honest way to recover a real value
+    here -- guessing "g" because it's the most common unit would be exactly the kind of
+    fabricated verdict this project is built to never produce. Correct behaviour is "not found",
+    not a lucky-guessed number -- this is what actually ships today, confirmed against the real
+    photo re-run live; this test pins it down as a deliberate, tested outcome rather than an
+    accidental side effect that could silently flip to fabricating "70g" later."""
+    regions = [region("QUANTITY: +70")]
+    d = extract_declarations(regions)
+    assert not d.net_quantity_value.found
+
+
 def test_extracts_consumer_care_phone_and_email():
     regions = [region("Consumer Care: 1800-123-4567, help@example.com")]
     d = extract_declarations(regions)
