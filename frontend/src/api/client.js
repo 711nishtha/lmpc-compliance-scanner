@@ -90,7 +90,26 @@ export const api = {
     }),
   createScan: (formData) => request('/scans', { method: 'POST', body: formData }),
   dashboardSummary: () => request('/dashboard/summary'),
-  reportPdfUrl: (id) => `${API_BASE}/api/reports/${id}/pdf`,
-  reportDocxUrl: (id) => `${API_BASE}/api/reports/${id}/docx`,
+  // Reports are auth-gated (app/api/reports.py depends on get_current_user), so they CANNOT be
+  // opened with a plain <a href>: a browser navigation carries no Authorization header, so the
+  // link just landed on the backend URL and 401'd. Fetch the bytes with the token, then hand the
+  // browser a blob to save -- the same approach ScanDetail already uses for the annotated image.
+  downloadReport: async (id, kind) => {
+    const blob = await request(`/reports/${id}/${kind}`)
+    // Filename is constructed here rather than read from Content-Disposition: that header is not
+    // readable cross-origin unless the server adds it to Access-Control-Expose-Headers, and this
+    // matches the name the backend sets.
+    const filename = `compliance_report_${id}.${kind}`
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url
+    a.download = filename
+    document.body.appendChild(a)
+    a.click()
+    a.remove()
+    // Revoked on the next tick, not immediately: revoking synchronously after click() can beat
+    // the browser to reading the blob in some engines.
+    setTimeout(() => URL.revokeObjectURL(url), 0)
+  },
   scanImageUrl: (id) => `${API_BASE}/api/scans/${id}/image`,
 }

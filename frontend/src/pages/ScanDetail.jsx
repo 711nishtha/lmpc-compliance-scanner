@@ -17,7 +17,28 @@ export default function ScanDetail() {
   const [verifyNote, setVerifyNote] = useState('')
   const [verifyError, setVerifyError] = useState('')
   const [verifyBusy, setVerifyBusy] = useState(false)
+  const [downloading, setDownloading] = useState(null)
+  const [downloadError, setDownloadError] = useState('')
   const isAdmin = getRole() === 'admin'
+
+  async function download(kind) {
+    setDownloading(kind)
+    setDownloadError('')
+    try {
+      await api.downloadReport(id, kind)
+    } catch (e) {
+      // The common real cause is a report file that no longer exists: the free tier's disk is
+      // ephemeral and is wiped on every deploy, while the scan row in Postgres survives. Say that
+      // plainly rather than showing a bare 404.
+      setDownloadError(
+        e.status === 404
+          ? 'That report file is no longer on the server (storage is cleared on redeploy). Re-scan to regenerate it.'
+          : e.message
+      )
+    } finally {
+      setDownloading(null)
+    }
+  }
 
   useEffect(() => {
     api.getScan(id).then(setScan).catch((e) => setError(e.message))
@@ -136,11 +157,18 @@ export default function ScanDetail() {
             </div>
 
             <div className="export-row">
-              <a className="btn-inst btn-ghost btn-small" href={api.reportPdfUrl(scan.id)}
-                 target="_blank" rel="noreferrer">PDF</a>
-              <a className="btn-inst btn-ghost btn-small" href={api.reportDocxUrl(scan.id)}
-                 target="_blank" rel="noreferrer">DOCX</a>
+              <button type="button" className="btn-inst btn-ghost btn-small"
+                      disabled={downloading !== null}
+                      onClick={() => download('pdf')}>
+                {downloading === 'pdf' ? 'Preparing…' : 'PDF'}
+              </button>
+              <button type="button" className="btn-inst btn-ghost btn-small"
+                      disabled={downloading !== null}
+                      onClick={() => download('docx')}>
+                {downloading === 'docx' ? 'Preparing…' : 'DOCX'}
+              </button>
             </div>
+            {downloadError && <div className="auth-error">{downloadError}</div>}
           </div>
         </aside>
       </div>
